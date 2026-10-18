@@ -167,7 +167,7 @@ async function main(): Promise<void> {
         `select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
          where n.nspname = 'public' and c.relkind = 'r'`,
       );
-      equal(Number(total.count), 22, "table count");
+      equal(Number(total.count), 23, "table count");
     });
 
     await test("every foreign key is indexed, and no table has overlapping policies for one role", async () => {
@@ -1320,6 +1320,221 @@ async function main(): Promise<void> {
       await as(ALICE, () => rows("delete from public.notifications"));
       equal((await as(ALICE, () => rows("select * from public.my_notifications"))).length, 0, "deleted");
       await as(ALICE, () => rows("delete from public.favorites"));
+    });
+
+    // -----------------------------------------------------------------------
+    console.log("\nContact the lister");
+
+    const approve = async (listingId: string) => as(MOD, () => rows("update public.property_listings set status = 'active' where id = $1", [listingId]));
+    const reveal = (actor: Actor, listingId: string) =>
+      as(actor, () => one<{ contact_name: string; phone: string; whatsapp: string | null }>("select * from public.reveal_listing_phone($1)", [listingId]));
+    const available = (listingId: string) => as(ANON, async () => (await one<{ ok: boolean }>("select public.listing_phone_available($1) as ok", [listingId])).ok);
+    const shown = (await submit(BOB, { show_phone: true, whatsapp: "01712345678" })).listing_id;
+    const hidden = (await submit(BOB)).listing_id;
+    const shown2 = (await submit(BOB, { show_phone: true })).listing_id;
+
+    await test("a number can be asked for only on an approved listing whose lister chose to show it", async () => {
+      equal(await available(shown), false, "pending listing");
+      await approve(shown);
+      await approve(hidden);
+      await approve(shown2);
+      equal(await available(shown), true, "approved, number shown");
+      equal(await available(hidden), false, "lister kept the number hidden");
+      const details = await as(ANON, () => one<Record<string, unknown>>("select * from public.listing_details where id = $1", [shown]));
+      truthy(!Object.values(details).includes("01712345678"), "the number is not in the public details");
+    });
+
+    await test("demo listings never hand out a number, even if one is stored", async () => {
+      const demo = await as(SUPER, () =>
+        one<{ id: string }>("select id from public.property_listings where is_demo and origin = 'first_party' and status = 'active' order by id limit 1"),
+      );
+      await as(SUPER, () =>
+        rows(
+          `insert into public.listing_contacts (listing_id, contact_name, phone, show_phone) values ($1, 'Demo', '01800000000', true)
+           on conflict (listing_id) do update set phone = excluded.phone, show_phone = true`,
+          [demo.id],
+        ),
+      );
+      equal(await available(demo.id), false, "demo listing");
+      await denied(ALICE, () => reveal(ALICE, demo.id), "P0002");
+      await as(SUPER, () => rows("delete from public.listing_contacts where listing_id = $1", [demo.id]));
+    });
+
+    await test("visitors must sign in; a signed-in user gets the number and the reveal is logged for staff only", async () => {
+      await denied(ANON, () => rows("select * from public.reveal_listing_phone($1)", [shown]), PERMISSION_DENIED);
+      equal(await reveal(ALICE, shown), { contact_name: "Bob", phone: "01712345678", whatsapp: "01712345678" }, "alice's answer");
+      await reveal(ALICE, shown);
+      await denied(ALICE, () => reveal(ALICE, hidden), "P0002");
+      const logged = await as(MOD, () => rows<{ user_id: string; times: number }>("select user_id, times from public.contact_reveals where listing_id = $1", [shown]));
+      equal(logged, [{ user_id: alice, times: 2 }], "one row per person, counting repeats");
+      equal((await as(ALICE, () => rows("select * from public.contact_reveals"))).length, 0, "users cannot read the log");
+      await denied(ALICE, () => rows("insert into public.contact_reveals (user_id, listing_id) values ($1, $2)", [alice, hidden]), PERMISSION_DENIED);
+      await denied(ANON, () => rows("select * from public.contact_reveals"), PERMISSION_DENIED);
+    });
+
+    await test("the lister and staff are not counted; the lister sees how many people looked", async () => {
+      await reveal(BOB, shown);
+      await reveal(MOD, shown);
+      const counts = await as(BOB, () => rows<{ listing_id: string; people: number }>("select * from public.my_listing_reveal_counts()"));
+      equal(counts, [{ listing_id: shown, people: 1 }], "bob's counts");
+      equal((await as(ALICE, () => rows("select * from public.my_listing_reveal_counts()"))).length, 0, "alice has no listings");
+      await denied(ANON, () => rows("select * from public.my_listing_reveal_counts()"), PERMISSION_DENIED);
+    });
+
+    await test("one account sees at most 20 different numbers a day; asking again for one already seen is free", async () => {
+      const others = await as(SUPER, () =>
+        rows<{ id: string }>("select id from public.property_listings where id not in ($1, $2, $3) order by id limit 19", [shown, hidden, shown2]),
+      );
+      await as(SUPER, async () => {
+        for (const other of others) await rows("insert into public.contact_reveals (user_id, listing_id) values ($1, $2)", [alice, other.id]);
+      });
+      await reveal(ALICE, shown);
+      try {
+        await reveal(ALICE, shown2);
+        throw new Error("the 21st number was handed out");
+      } catch (error) {
+        equal((error as { hint?: string }).hint, "daily_limit", "refusal reason");
+      }
+      await as(SUPER, () => rows("update public.contact_reveals set last_revealed_at = now() - interval '25 hours' where user_id = $1 and listing_id <> $2", [alice, shown]));
+      equal((await reveal(ALICE, shown2)).phone, "01712345678", "allowed again the next day");
+    });
+
+    await test("the lister can hide the number again; others cannot change it; a rented listing hands out nothing", async () => {
+      await as(ALICE, () => rows("update public.listing_contacts set show_phone = false where listing_id = $1", [shown2]));
+      equal(await available(shown2), true, "alice cannot hide bob's number");
+      await as(BOB, () => rows("update public.listing_contacts set show_phone = false where listing_id = $1", [shown2]));
+      equal(await available(shown2), false, "bob hid it");
+      await as(BOB, () => rows("update public.property_listings set status = 'rented' where id = $1", [shown]));
+      equal(await available(shown), false, "rented");
+      await denied(ALICE, () => reveal(ALICE, shown), "P0002");
+      await as(SUPER, () => rows("delete from public.property_listings where id in ($1, $2, $3)", [shown, hidden, shown2]));
+    });
+
+    // -----------------------------------------------------------------------
+    console.log("\nEditing a listing");
+
+    const statusOf = async (id: string) => (await as(SUPER, () => one<{ status: string }>("select status::text from public.property_listings where id = $1", [id]))).status;
+    const edit = (actor: Actor, id: string, overrides: Record<string, unknown> = {}) =>
+      as(actor, async () => (await one<{ status: string }>("select public.update_listing($1, $2::jsonb) as status", [id, JSON.stringify(submission(overrides))])).status);
+    const live = (await submit(BOB, { title: "সম্পাদনার পরীক্ষা" })).listing_id;
+    await approve(live);
+    const base = { title: "সম্পাদনার পরীক্ষা" };
+
+    await test("saving the form unchanged keeps the listing live", async () => {
+      equal(await edit(BOB, live, base), "active", "status");
+    });
+
+    await test("an ordinary price change stays live and is recorded; a huge one goes back to review", async () => {
+      equal(await edit(BOB, live, { ...base, price: 30000 }), "active", "status after a small drop");
+      const row = await as(SUPER, () => one<{ price: string; previous_price: string }>("select price, previous_price from public.property_listings where id = $1", [live]));
+      equal([Number(row.price), Number(row.previous_price)], [30000, 32000], "price and previous price");
+      equal(await edit(BOB, live, { ...base, price: 9000 }), "pending_review", "status after a drop to under half");
+      await approve(live);
+    });
+
+    await test("changing the text, facts, area, amenities, address or phone goes back to review", async () => {
+      const changes: Array<[string, Record<string, unknown>]> = [
+        ["description", { description: "নতুন বিবরণ" }],
+        ["bedrooms", { bedrooms: 4 }],
+        ["area", { location_slug: "mirpur" }],
+        ["amenities", { amenities: ["lift"] }],
+        ["address", { address_line: "House 99" }],
+        ["phone", { phone: "01999999999" }],
+      ];
+      let current: Record<string, unknown> = { ...base, price: 9000 };
+      for (const [label, change] of changes) {
+        current = { ...current, ...change };
+        equal(await edit(BOB, live, current), "pending_review", label);
+        equal(await as(ANON, async () => (await rows("select id from public.listing_cards where id = $1", [live])).length), 0, `${label}: off the site meanwhile`);
+        await approve(live);
+      }
+      const stored = await as(SUPER, () =>
+        one<Record<string, unknown>>(
+          `select (select slug from public.locations where id = p.location_id) as area, p.bedrooms, pp.address_line, c.phone,
+                  p.latitude = loc.latitude and p.longitude = loc.longitude as at_area_centre
+             from public.property_listings l join public.properties p on p.id = l.property_id
+             join public.locations loc on loc.id = p.location_id
+             left join public.property_private pp on pp.property_id = p.id
+             left join public.listing_contacts c on c.listing_id = l.id where l.id = $1`,
+          [live],
+        ),
+      );
+      equal(stored, { area: "mirpur", bedrooms: 4, address_line: "House 99", phone: "01999999999", at_area_centre: true }, "saved values");
+      base.title = "সম্পাদনার পরীক্ষা";
+      Object.assign(base, current);
+    });
+
+    await test("switching the number on or off does not need review", async () => {
+      equal(await edit(BOB, live, { ...base, show_phone: true }), "active", "status");
+      await as(BOB, () => rows("update public.listing_contacts set show_phone = false where listing_id = $1", [live]));
+      equal(await statusOf(live), "active", "after switching off directly");
+    });
+
+    await test("changes made straight through the API are caught too", async () => {
+      await as(BOB, () => rows("update public.property_listings set title = 'বদলানো শিরোনাম' where id = $1", [live]));
+      equal(await statusOf(live), "pending_review", "title");
+      await approve(live);
+      const prop = (await as(SUPER, () => one<{ property_id: string }>("select property_id from public.property_listings where id = $1", [live]))).property_id;
+      await as(BOB, () => rows("update public.properties set size_sqft = 5000 where id = $1", [prop]));
+      equal(await statusOf(live), "pending_review", "size");
+      await approve(live);
+      await as(BOB, () => rows("insert into public.property_amenities (property_id, amenity_slug) values ($1, 'generator') on conflict do nothing", [prop]));
+      equal(await statusOf(live), "pending_review", "amenity");
+      await approve(live);
+      await denied(BOB, () => rows("update public.property_listings set slug = 'my-own-slug' where id = $1", [live]), PERMISSION_DENIED);
+    });
+
+    await test("staff edits stay live", async () => {
+      await as(MOD, () => rows("update public.property_listings set title = 'স্টাফের সংশোধন' where id = $1", [live]));
+      equal(await statusOf(live), "active", "status");
+    });
+
+    await test("only the lister can edit, and only while pending or live", async () => {
+      await denied(ALICE, () => edit(ALICE, live, base), PERMISSION_DENIED);
+      await denied(ANON, () => rows("select public.update_listing($1, '{}'::jsonb)", [live]), PERMISSION_DENIED);
+      await denied(BOB, () => edit(BOB, live, { ...base, location_slug: "dhaka-district" }), "22023");
+      const rented = (await submit(BOB)).listing_id;
+      await approve(rented);
+      await as(BOB, () => rows("update public.property_listings set status = 'rented' where id = $1", [rented]));
+      await denied(BOB, () => edit(BOB, rented), PERMISSION_DENIED);
+      await as(SUPER, () => rows("delete from public.property_listings where id = $1", [rented]));
+    });
+
+    await test("photos can be added, removed and reordered; the first is the cover; it goes back to review", async () => {
+      const folder = `${bob}/${live}`;
+      const url = (path: string) => `https://project.supabase.co/storage/v1/object/public/listing-images/${path}`;
+      await as(SUPER, async () => {
+        for (const n of [1, 2, 3]) await rows("insert into storage.objects (bucket_id, name, owner) values ('listing-images', $1, $2)", [`${folder}/${n}.webp`, bob]);
+      });
+      const photos = (keep: string[], add: number[]) =>
+        as(BOB, async () =>
+          Number(
+            (
+              await one<{ n: number }>("select public.update_listing_photos($1, $2::uuid[], $3::jsonb, 'alt') as n", [
+                live,
+                keep,
+                JSON.stringify(add.map((n) => ({ path: `${folder}/${n}.webp`, url: url(`${folder}/${n}.webp`) }))),
+              ])
+            ).n,
+          ),
+        );
+      const order = () =>
+        as(SUPER, () => rows<{ id: string; storage_path: string; is_primary: boolean }>("select id, storage_path, is_primary from public.listing_images where listing_id = $1 order by sort_order", [live]));
+
+      equal(await photos([], [1, 2, 3]), 3, "three photos");
+      equal(await statusOf(live), "pending_review", "photos changed");
+      await approve(live);
+      const first = await order();
+      equal(first.map((p) => [p.storage_path.slice(-6), p.is_primary]), [["1.webp", true], ["2.webp", false], ["3.webp", false]], "order and cover");
+
+      equal(await photos([first[2].id, first[0].id], []), 2, "removed one");
+      const second = await order();
+      equal(second.map((p) => [p.storage_path.slice(-6), p.is_primary]), [["3.webp", true], ["1.webp", false]], "reordered, new cover");
+      await approve(live);
+
+      await denied(ALICE, () => as(ALICE, () => rows("select public.update_listing_photos($1, '{}'::uuid[], '[]'::jsonb, '')", [live])), PERMISSION_DENIED);
+      await denied(BOB, () => photos([], [9]), CHECK_VIOLATION);
+      await as(SUPER, () => rows("delete from public.property_listings where id = $1", [live]));
     });
 
     // -----------------------------------------------------------------------

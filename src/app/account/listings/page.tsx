@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 import { AuthNotConfigured } from "@/components/auth/auth-shell";
+import { PhoneToggle } from "@/components/contact/phone-toggle";
 import { OwnListingActions } from "@/components/listing-form/own-listing-actions";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +11,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { requireUser } from "@/lib/auth/session";
 import { listingPath } from "@/lib/domain/urls";
 import { isSupabaseConfigured } from "@/lib/env";
-import { formatDateBn, formatPriceBn } from "@/lib/format/bn";
+import { getMyPhoneSettings, getMyRevealCounts } from "@/lib/contact/server";
+import { formatDateBn, formatPriceBn, toBnDigits } from "@/lib/format/bn";
 import { bn, LISTING_STATUS_LABEL, PROPERTY_TYPE_LABEL, PURPOSE_LABEL } from "@/lib/i18n/bn";
 import { getMyListings } from "@/lib/listings/server";
 
@@ -24,6 +26,16 @@ const STATUS_VARIANT = {
   rented: "neutral",
   archived: "outline",
 } as const;
+
+const EDITED_MESSAGE = {
+  live: bn.editListing.savedLive,
+  review: bn.editListing.savedReview,
+  pending: bn.editListing.savedPending,
+  photos: bn.editListing.savedPhotosFailed,
+} as const;
+
+/** Listings someone could still call about. */
+const OPEN_STATUSES = new Set(["pending_review", "active"]);
 
 export default function MyListingsPage({ searchParams }: PageProps<"/account/listings">) {
   return (
@@ -51,13 +63,20 @@ export default function MyListingsPage({ searchParams }: PageProps<"/account/lis
 
 async function OwnListings({ searchParams }: Pick<PageProps<"/account/listings">, "searchParams">) {
   const user = await requireUser("/account/listings");
-  const [{ submitted }, listings] = await Promise.all([searchParams, getMyListings(user)]);
+  const [{ submitted, edited }, listings, revealCounts] = await Promise.all([searchParams, getMyListings(user), getMyRevealCounts()]);
+  const phones = await getMyPhoneSettings(listings.map((listing) => listing.id));
 
   return (
     <>
       {submitted === "1" || submitted === "photos" ? (
         <Alert variant={submitted === "1" ? "success" : "notice"} role="status" className="mb-5">
           {submitted === "1" ? bn.myListings.submitted : bn.myListings.submittedPhotosFailed}
+        </Alert>
+      ) : null}
+
+      {typeof edited === "string" && edited in EDITED_MESSAGE ? (
+        <Alert variant={edited === "photos" ? "notice" : "success"} role="status" className="mb-5">
+          {EDITED_MESSAGE[edited as keyof typeof EDITED_MESSAGE]}
         </Alert>
       ) : null}
 
@@ -83,10 +102,22 @@ async function OwnListings({ searchParams }: Pick<PageProps<"/account/listings">
                 <p className="mt-2 text-sm text-slate">
                   {bn.myListings.statusHelp[status] ?? ""} {bn.myListings.submittedOn(formatDateBn(listing.submittedAt))}
                 </p>
+                {OPEN_STATUSES.has(listing.status) && phones.get(listing.id)?.hasPhone ? (
+                  <PhoneToggle
+                    listingId={listing.id}
+                    initialShown={phones.get(listing.id)?.showPhone ?? false}
+                    people={revealCounts.get(listing.id) ? bn.contact.people(toBnDigits(revealCounts.get(listing.id) ?? 0)) : null}
+                  />
+                ) : null}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {listing.status === "active" ? (
                     <Button asChild size="sm" variant="outline">
                       <Link href={listingPath(listing)}>{bn.myListings.view}</Link>
+                    </Button>
+                  ) : null}
+                  {OPEN_STATUSES.has(listing.status) ? (
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/account/listings/${listing.id}/edit`}>{bn.editListing.edit}</Link>
                     </Button>
                   ) : null}
                   <OwnListingActions listingId={listing.id} status={listing.status} purpose={listing.purpose} />

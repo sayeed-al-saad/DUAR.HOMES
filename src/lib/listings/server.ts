@@ -19,7 +19,8 @@ function randomSuffix(): string {
   return Math.random().toString(36).slice(2, 8);
 }
 
-export async function submitListing(raw: Submission): Promise<SubmitResult> {
+/** The form's answers as the database functions expect them. Shared by submitting and editing. */
+function listingPayload(raw: Submission) {
   const data = relevantFacts(raw);
   const facts = {
     propertyType: data.propertyType,
@@ -28,11 +29,9 @@ export async function submitListing(raw: Submission): Promise<SubmitResult> {
     sizeSqft: data.sizeSqft ?? null,
     landSizeKatha: data.landSizeKatha ?? null,
   };
-  const title = data.title || buildListingTitle(facts);
-
-  const supabase = await createSupabaseServerClient();
-  const { data: rows, error } = await supabase.rpc("submit_listing", {
-    p: {
+  return {
+    facts,
+    payload: {
       purpose: data.purpose,
       property_type: data.propertyType,
       location_slug: data.locationSlug,
@@ -49,13 +48,22 @@ export async function submitListing(raw: Submission): Promise<SubmitResult> {
       furnishing: data.furnishing ?? null,
       parking_spaces: data.parkingSpaces ?? null,
       amenities: data.amenities,
-      title,
-      slug: buildListingSlug(facts, randomSuffix()),
+      title: data.title || buildListingTitle(facts),
       description: data.description,
       lister_type: data.listerType,
       contact_name: data.contactName,
       phone: data.phone,
+      whatsapp: data.hasWhatsapp ? data.phone : null,
+      show_phone: data.showPhone,
     },
+  };
+}
+
+export async function submitListing(raw: Submission): Promise<SubmitResult> {
+  const { facts, payload } = listingPayload(raw);
+  const supabase = await createSupabaseServerClient();
+  const { data: rows, error } = await supabase.rpc("submit_listing", {
+    p: { ...payload, slug: buildListingSlug(facts, randomSuffix()) },
   });
 
   if (error) {
@@ -220,4 +228,161 @@ export async function reviewListing(listingId: string, decision: "active" | "rej
     .eq("status", "pending_review");
   if (error) console.error("review failed:", error.code, error.message);
   return !error && (count ?? 0) > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Editing your own listing
+// ---------------------------------------------------------------------------
+
+/** Listings their lister can still edit. The database enforces the same list. */
+export const EDITABLE_STATUSES = ["pending_review", "active"] as const;
+
+export interface EditableListing {
+  id: string;
+  slug: string;
+  status: ListingStatus;
+  locationSlug: string;
+  photos: Array<{ id: string; url: string }>;
+  /** The form's starting values, in the same shape the form submits. */
+  values: {
+    purpose: Purpose;
+    propertyType: PropertyType;
+    addressLine: string;
+    price: string;
+    priceNegotiable: boolean;
+    sizeSqft: string;
+    landSizeKatha: string;
+    bedrooms: string;
+    bathrooms: string;
+    balconies: string;
+    floorNumber: string;
+    totalFloors: string;
+    furnishing: string;
+    parkingSpaces: string;
+    amenities: string[];
+    title: string;
+    description: string;
+    listerType: ListerType;
+    contactName: string;
+    phone: string;
+    showPhone: boolean;
+    hasWhatsapp: boolean;
+  };
+}
+
+const text = (value: unknown) => (value === null || value === undefined ? "" : String(value));
+const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
+
+/** One of the user's own listings with everything the edit form needs, or null. */
+export async function getListingForEdit(user: CurrentUser, listingId: string): Promise<EditableListing | null> {
+  if (!isUuid(listingId)) return null;
+  const supabase = await createSupabaseServerClient();
+  const { data: listing } = await supabase
+    .from("property_listings")
+    .select("id, slug, status, purpose, title, description, price, price_negotiable, lister_type, property_id")
+    .eq("id", listingId)
+    .eq("listed_by_user_id", user.id)
+    .maybeSingle();
+  if (!listing) return null;
+  const row = listing as Row;
+  const propertyId = String(row.property_id);
+
+  const [property, amenities, address, contact, images] = await Promise.all([
+    supabase
+      .from("properties")
+      .select("property_type, size_sqft, land_size_katha, bedrooms, bathrooms, balconies, floor_number, total_floors, furnishing, parking_spaces, locations(slug)")
+      .eq("id", propertyId)
+      .maybeSingle(),
+    supabase.from("property_amenities").select("amenity_slug").eq("property_id", propertyId),
+    supabase.from("property_private").select("address_line").eq("property_id", propertyId).maybeSingle(),
+    supabase.from("listing_contacts").select("contact_name, phone, whatsapp, show_phone").eq("listing_id", listingId).maybeSingle(),
+    supabase.from("listing_images").select("id, url, sort_order").eq("listing_id", listingId).order("sort_order"),
+  ]);
+  const facts = (property.data ?? {}) as Row;
+  const place = facts.locations as { slug?: unknown } | null;
+  const phone = (contact.data ?? {}) as Row;
+
+  return {
+    id: listingId,
+    slug: String(row.slug),
+    status: oneOf(LISTING_STATUSES, row.status, "pending_review"),
+    locationSlug: text(place?.slug),
+    photos: ((images.data ?? []) as Row[]).map((image) => ({ id: String(image.id), url: String(image.url) })),
+    values: {
+      purpose: oneOf(PURPOSES, row.purpose, "rent"),
+      propertyType: oneOf(PROPERTY_TYPES, facts.property_type, "apartment"),
+      addressLine: text((address.data as Row | null)?.address_line),
+      price: text(row.price === null ? "" : Number(row.price)),
+      priceNegotiable: row.price_negotiable === true,
+      sizeSqft: text(facts.size_sqft === null || facts.size_sqft === undefined ? "" : Number(facts.size_sqft)),
+      landSizeKatha: text(facts.land_size_katha === null || facts.land_size_katha === undefined ? "" : Number(facts.land_size_katha)),
+      bedrooms: text(facts.bedrooms),
+      bathrooms: text(facts.bathrooms),
+      balconies: text(facts.balconies),
+      floorNumber: text(facts.floor_number),
+      totalFloors: text(facts.total_floors),
+      furnishing: text(facts.furnishing),
+      parkingSpaces: text(facts.parking_spaces),
+      amenities: ((amenities.data ?? []) as Row[]).map((amenity) => String(amenity.amenity_slug)),
+      title: text(row.title),
+      description: text(row.description),
+      listerType: oneOf(LISTER_TYPES, row.lister_type, "owner"),
+      contactName: text(phone.contact_name),
+      phone: text(phone.phone),
+      showPhone: phone.show_phone === true,
+      hasWhatsapp: typeof phone.whatsapp === "string" && phone.whatsapp.length > 0,
+    },
+  };
+}
+
+export type UpdateResult = { ok: true; status: ListingStatus } | { ok: false; reason: "not_editable" | "location" | "failed" };
+
+/** Saves the edit form (everything but photos). Returns the listing's status afterwards. */
+export async function updateListing(listingId: string, raw: Submission): Promise<UpdateResult> {
+  if (!isUuid(listingId)) return { ok: false, reason: "not_editable" };
+  const { payload } = listingPayload(raw);
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.rpc("update_listing", { p_listing_id: listingId, p: payload });
+  if (error) {
+    if (error.hint === "not_editable") return { ok: false, reason: "not_editable" };
+    if (error.hint === "location") return { ok: false, reason: "location" };
+    console.error("update_listing failed:", error.code, error.message);
+    return { ok: false, reason: "failed" };
+  }
+  return { ok: true, status: oneOf(LISTING_STATUSES, data, "pending_review") };
+}
+
+/**
+ * Saves the photo list: keep these existing photos in this order, then add the
+ * new uploads. Files of removed photos are deleted from storage afterwards.
+ * Returns the number of photos now on the listing, or null on failure.
+ */
+export async function updateListingPhotos(user: CurrentUser, listingId: string, keep: string[], newPaths: string[], alt: string): Promise<number | null> {
+  if (!isUuid(listingId)) return null;
+  const prefix = `${user.id}/${listingId}/`;
+  const added = newPaths.filter((path) => path.startsWith(prefix) && /^[a-z0-9-]+\/[a-z0-9-]+\/[a-z0-9-]+\.(jpg|png|webp)$/i.test(path));
+  const kept = keep.filter(isUuid);
+  const supabase = await createSupabaseServerClient();
+
+  const { data: before } = await supabase.from("listing_images").select("id, storage_path").eq("listing_id", listingId);
+  const removed = ((before ?? []) as Row[])
+    .filter((image) => !kept.includes(String(image.id)) && typeof image.storage_path === "string")
+    .map((image) => String(image.storage_path))
+    .filter((path) => path.startsWith(prefix));
+
+  const { data, error } = await supabase.rpc("update_listing_photos", {
+    p_listing_id: listingId,
+    p_keep: kept,
+    p_new: added.map((path) => ({ path, url: supabase.storage.from("listing-images").getPublicUrl(path).data.publicUrl })),
+    p_alt: alt.slice(0, 200),
+  });
+  if (error) {
+    console.error("update_listing_photos failed:", error.code, error.message);
+    return null;
+  }
+  if (removed.length > 0) {
+    const { error: removeError } = await supabase.storage.from("listing-images").remove(removed);
+    if (removeError) console.error("removing old photo files failed:", removeError.message);
+  }
+  return Number(data);
 }
