@@ -1,0 +1,334 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens
+ *
+ * Palette, named for where it comes from:
+ *   নীল (indigo)         the brand colour: headings, the hero block, primary actions
+ *   কৃষ্ণচূড়া (flame)     the one warm accent: the search button and price drops
+ *   মেঘ (cloud)          cool off-white for bands and quiet surfaces
+ *
+ * Green and yellow are deliberately absent so the site is never mistaken for
+ * the existing Bangladeshi property portals.
+ *
+ * The variable names follow shadcn/ui, so components added later with
+ * `npx shadcn add` pick these colours up automatically.
+ */
+:root {
+  color-scheme: light;
+
+  --ink: #15173d;
+  --indigo: #2f34a8;
+  --indigo-deep: #1f2380;
+  --indigo-soft: #e7e9fb;
+  --flame: #d3381c;
+  --flame-deep: #b02c13;
+  --flame-soft: #fdece8;
+  --cloud: #f2f4fb;
+  --line: #dfe2f1;
+  --slate: #5a5e7c;
+  --amber-soft: #fff3d6;
+  --amber-ink: #6f4400;
+
+  --background: #ffffff;
+  --foreground: var(--ink);
+  --card: #ffffff;
+  --card-foreground: var(--ink);
+  --popover: #ffffff;
+  --popover-foreground: var(--ink);
+  --primary: var(--indigo);
+  --primary-foreground: #ffffff;
+  --secondary: var(--cloud);
+  --secondary-foreground: var(--ink);
+  --muted: var(--cloud);
+  --muted-foreground: var(--slate);
+  --accent: var(--indigo-soft);
+  --accent-foreground: var(--ink);
+  --destructive: #c0271a;
+  --border: var(--line);
+  /* Darker than --border on purpose: form field edges need 3:1 contrast. */
+  --input: #8a8fb5;
+  --ring: var(--indigo);
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-ink: var(--ink);
+  --color-indigo: var(--indigo);
+  --color-indigo-deep: var(--indigo-deep);
+  --color-indigo-soft: var(--indigo-soft);
+  --color-flame: var(--flame);
+  --color-flame-deep: var(--flame-deep);
+  --color-flame-soft: var(--flame-soft);
+  --color-cloud: var(--cloud);
+  --color-line: var(--line);
+  --color-slate: var(--slate);
+  --color-amber-soft: var(--amber-soft);
+  --color-amber-ink: var(--amber-ink);
+
+  /*
+   * One family, Anek Bangla, in two weights. The Latin and Bengali halves are
+   * separate files (see src/app/fonts.ts); the browser picks per character.
+   * Every Android phone ships Noto Sans Bengali, so text is readable at once
+   * and swaps when the web font arrives.
+   */
+  --font-sans:
+    var(--font-anek-latin), var(--font-anek-bengali), "Noto Sans Bengali", "Hind Siliguri", ui-sans-serif, system-ui,
+    sans-serif;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 10px);
+
+  /*
+   * Type scale (ratio about 1.2 on phones, opening up on large screens).
+   * Bangla needs more line height than Latin: vowel signs and conjuncts reach
+   * above and below the line, so nothing here goes under 1.2.
+   */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.55;
+  --text-base: 1.0625rem;
+  --text-base--line-height: 1.65;
+  --text-lg: 1.1875rem;
+  --text-lg--line-height: 1.5;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.4;
+  --text-2xl: 1.625rem;
+  --text-2xl--line-height: 1.35;
+  --text-3xl: 2rem;
+  --text-3xl--line-height: 1.3;
+  --text-4xl: 2.5rem;
+  --text-4xl--line-height: 1.25;
+  --text-5xl: 3.25rem;
+  --text-5xl--line-height: 1.2;
+  --text-6xl: 4.25rem;
+  --text-6xl--line-height: 1.2;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    scroll-padding-top: 1rem;
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.65;
+    font-synthesis-weight: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 700;
+  }
+
+  /* Balanced lines suit big headings; small card titles read better unbalanced. */
+  h1,
+  h2 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::selection {
+    background: var(--indigo-soft);
+  }
+
+  /* No decorative motion anywhere; honour the system setting for the rest. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /*
+   * Search map markers: a pill with the count and the lowest price, centred on
+   * the place. Leaflet positions the (zero-size) icon; the pill is centred on it.
+   */
+  .duar-map-pin {
+    background: none;
+    border: 0;
+  }
+
+  .duar-map-pin span {
+    display: inline-block;
+    transform: translate(-50%, -50%);
+    white-space: nowrap;
+    padding: 0.25rem 0.625rem;
+    border-radius: 999px;
+    background: var(--indigo);
+    color: #fff;
+    font-family: var(--font-sans), system-ui, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    line-height: 1.4;
+    box-shadow: 0 2px 6px rgb(20 22 60 / 0.3);
+  }
+
+  .duar-map-pin:hover span,
+  .duar-map-pin:focus-visible span {
+    background: var(--flame);
+  }
+
+  .duar-map-pin:focus-visible {
+    outline: none;
+  }
+
+  .duar-map-pin:focus-visible span {
+    outline: 3px solid var(--flame);
+    outline-offset: 2px;
+  }
+
+  .leaflet-container {
+    font-family: var(--font-sans), system-ui, sans-serif;
+  }
+
+  .duar-map-popup p {
+    margin: 0 0 0.25rem;
+    font-size: 0.875rem;
+  }
+
+  .duar-map-popup p:first-child {
+    font-size: 1rem;
+  }
+
+  .duar-map-popup a {
+    display: inline-block;
+    margin-top: 0.25rem;
+    font-size: 0.875rem;
+    color: var(--indigo);
+  }
+
+  /* Page gutter and maximum width, used by every section. */
+  .page-shell {
+    width: 100%;
+    max-width: 78rem;
+    margin-inline: auto;
+    padding-inline: 1rem;
+  }
+
+  @media (min-width: 640px) {
+    .page-shell {
+      padding-inline: 1.5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .page-shell {
+      padding-inline: 2rem;
+    }
+  }
+
+  /*
+   * Listing rail: a swipeable row on phones (the next card peeks in from the
+   * right), a grid from tablets up. CSS only, so it works before any script loads.
+   */
+  .listing-rail {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: min(78vw, 19rem);
+    gap: 0.875rem;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 1rem;
+    margin-inline: -1rem;
+    padding-inline: 1rem;
+    padding-bottom: 0.5rem;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .listing-rail::-webkit-scrollbar {
+    display: none;
+  }
+
+  .listing-rail > * {
+    scroll-snap-align: start;
+  }
+
+  @media (min-width: 640px) {
+    .listing-rail {
+      grid-auto-flow: row;
+      grid-auto-columns: auto;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1.25rem;
+      overflow: visible;
+      margin-inline: 0;
+      padding-inline: 0;
+      padding-bottom: 0;
+    }
+  }
+
+  @media (min-width: 900px) {
+    .listing-rail {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+
+  @media (min-width: 1200px) {
+    .listing-rail {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+
+  /* Space for the fixed bottom menu on phones, including the iPhone home bar. */
+  .with-mobile-nav {
+    padding-bottom: calc(4.25rem + env(safe-area-inset-bottom));
+  }
+
+  @media (min-width: 768px) {
+    .with-mobile-nav {
+      padding-bottom: 0;
+    }
+  }
+}

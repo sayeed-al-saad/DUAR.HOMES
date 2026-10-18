@@ -1,0 +1,579 @@
+Build a production-quality MVP for a Bangladesh real-estate search engine and marketplace.
+
+PROJECT CONCEPT
+
+The website is a Bangladesh-focused property search engine that combines:
+1. Our own property listings
+2. Publicly discoverable property information from external sources where legally and technically permitted
+3. Partner/authorized feeds
+4. Manual/admin imports
+
+The product should eventually become “Google for real estate in Bangladesh.”
+
+IMPORTANT CONTENT/PERSONAL-DATA RULES
+
+Do NOT design the system around blindly copying entire third-party listings.
+
+For external listings, the default stored/displayed information should be limited to useful property facts such as:
+- property type
+- sale/rent
+- price
+- area
+- size
+- bedrooms
+- bathrooms
+- location
+- amenities
+- listing date when available
+- source name
+- original listing URL
+- last checked timestamp
+
+Do not automatically copy third-party:
+- phone numbers
+- private contact details
+- full descriptions
+- copyrighted photos
+- logos/trademarks
+- account-only content
+- login-protected content
+
+unless the source/rights holder has explicitly authorized it.
+
+Do not bypass CAPTCHA, authentication, access controls, rate limits, or other technical restrictions.
+
+Implement source-specific ingestion adapters so each source can be enabled/disabled independently.
+
+Add source attribution on every external listing and a clear “View Original Listing” link.
+
+Use conservative defaults for privacy and copyright risk.
+
+TECH STACK
+
+Use:
+- Next.js
+- TypeScript
+- Tailwind CSS
+- shadcn/ui
+- Supabase
+- PostgreSQL
+- Supabase Auth
+- Supabase Storage where appropriate
+- Mapbox or Google Maps abstraction for location/map functionality
+
+Keep the architecture modular so services can be swapped later.
+
+LANGUAGE
+
+The primary user interface must be in Bangla.
+
+Use natural Bangladesh Bangla, not awkward literal translations.
+
+Allow English fallback/internal labels where useful for technical/admin areas.
+
+DESIGN
+
+Create a modern, trustworthy, premium real-estate interface.
+
+Visual direction:
+- clean
+- spacious
+- professional
+- mobile-first
+- fast
+- trustworthy
+- not overly corporate
+- not visually similar to Bikroy or Bproperty
+- strong property photography
+- rounded cards
+- clear prices
+- strong filtering
+- excellent mobile UX
+
+HOME PAGE
+
+Create:
+
+Hero section:
+“আপনার পছন্দের বাড়ি খুঁজুন”
+
+Search controls:
+- কিনুন
+- ভাড়া নিন
+- জমি
+- কমার্শিয়াল
+
+Search fields:
+- location
+- min price
+- max price
+- property type
+- bedrooms
+
+Sections:
+- জনপ্রিয় লিস্টিং
+- নতুন লিস্টিং
+- দাম কমেছে
+- মালিকের সরাসরি লিস্টিং
+- জনপ্রিয় এলাকা
+- এলাকার গড় দাম
+- কেন আমাদের ব্যবহার করবেন
+
+SEARCH PAGE
+
+Create an advanced search page with:
+- location
+- sale/rent
+- property type
+- price range
+- bedrooms
+- bathrooms
+- minimum size
+- maximum size
+- furnishing
+- parking
+- amenities
+- verified only
+- owner/direct only
+- source
+- freshness
+
+Results must support:
+- sorting
+- pagination or infinite loading
+- list/grid toggle
+- map view
+- saved searches
+
+PROPERTY CARD
+
+Each card should show:
+- image when rights permit
+- title
+- price
+- size
+- beds
+- baths
+- location
+- source
+- freshness
+- property type
+- verified badge when applicable
+
+Show external listings clearly as external-source listings.
+
+PROPERTY DETAILS PAGE
+
+Include:
+- title
+- price
+- property information
+- location
+- map
+- amenities
+- price per sqft
+- source
+- original URL
+- last checked date
+- listing status
+- report listing
+- similar properties
+- nearby properties
+- price comparison
+- area statistics
+
+Add a section:
+
+“এই দামের তুলনা”
+
+Show:
+- asking price
+- estimated price per sqft
+- comparable range
+- simple market-position indicator
+
+Do NOT make financial/legal guarantees. Clearly label estimates.
+
+DATABASE DESIGN
+
+Create normalized PostgreSQL schema for:
+
+users
+agents
+agencies
+properties
+property_listings
+sources
+listing_images
+locations
+favorites
+saved_searches
+inquiries
+reports
+price_history
+listing_changes
+listing_duplicates
+verification_records
+
+Important:
+
+A physical property and an online listing are separate concepts.
+
+Example:
+
+One property can have multiple listings from different sources.
+
+Create relationships that support this.
+
+SOURCE SYSTEM
+
+Create:
+
+sources table with:
+- id
+- name
+- website
+- source_type
+- ingestion_method
+- permission_status
+- active
+- last_checked
+- notes
+
+Create modular adapters/interfaces for:
+- API
+- RSS/feed
+- partner feed
+- CSV import
+- manual import
+- permitted public-page ingestion
+
+Do not implement aggressive scraping by default.
+
+ADMIN DASHBOARD
+
+Create an admin panel with:
+
+Dashboard:
+- total properties
+- total listings
+- active listings
+- stale listings
+- duplicate candidates
+- source status
+- new reports
+- verification requests
+
+Listing management:
+- approve
+- reject
+- edit
+- archive
+- mark sold
+- mark rented
+- mark stale
+- verify
+- merge duplicates
+
+Source management:
+- add source
+- disable source
+- ingestion status
+- last successful sync
+- error logs
+
+Moderation:
+- reports
+- suspicious listings
+- duplicate listings
+- fraudulent-looking listings
+- contact requests
+
+DUPLICATE DETECTION
+
+Design a duplicate-detection system.
+
+Use signals such as:
+- location
+- price
+- size
+- bedrooms
+- bathrooms
+- title similarity
+- normalized address
+- source URL
+- image similarity when legally available
+- phone number only for authorized first-party data, not scraped third-party contact data
+
+Store a confidence score.
+
+Example:
+
+Potential duplicate:
+Property A ↔ Property B
+Confidence: 87%
+
+Allow admin to:
+- merge
+- reject match
+- review later
+
+FRESHNESS
+
+Store:
+- first_seen_at
+- last_seen_at
+- last_checked_at
+- status
+
+Create freshness labels:
+- নতুন
+- সম্প্রতি যাচাই করা
+- পুরোনো
+- সম্ভবত আর সক্রিয় নয়
+
+Do not claim a property is available unless the data supports that claim.
+
+OWNER/AGENT LISTING SYSTEM
+
+Users should eventually be able to create their own listings.
+
+Support:
+- owner
+- agent
+- agency
+- developer
+
+First-party listings should have stronger functionality than aggregated external listings:
+- direct inquiry
+- phone/WhatsApp when voluntarily provided
+- photos
+- description
+- availability
+- verification
+- claim listing
+- edit listing
+
+CLAIM PROPERTY
+
+Add a “এই সম্পত্তি আপনার?” flow.
+
+A user can request ownership/agent control of a property.
+
+Admin reviews the request.
+
+Once verified, the listing becomes connected to that account.
+
+SEARCH/SEO
+
+Optimize for Bangladesh property searches.
+
+Create SEO-friendly URLs such as:
+
+/property/uttara/3-bedroom-apartment
+/property/dhaka/bashundhara-apartment-for-sale
+/rent/dhanmondi
+/land/uttara
+/commercial/dhaka
+
+Generate:
+- metadata
+- Open Graph
+- sitemap
+- canonical URLs
+- structured data where appropriate
+- location landing pages
+
+Do not create thousands of low-quality doorway pages.
+
+MAP
+
+Support:
+- map/list split view
+- property markers
+- area-based filtering
+- clustering
+- approximate location display where exact location should not be public
+
+SECURITY
+
+Implement:
+- authentication
+- authorization
+- Supabase Row Level Security
+- admin roles
+- agent roles
+- owner roles
+- input validation
+- rate limiting
+- abuse prevention
+- secure image handling
+
+Do not expose private user fields through public APIs.
+
+PERFORMANCE
+
+Prioritize:
+- fast initial load
+- responsive images
+- lazy loading
+- server-side rendering where useful
+- pagination
+- database indexes
+- caching
+- efficient queries
+
+MOBILE
+
+The website must work excellently on mobile.
+
+Design for Bangladesh users who may use:
+- low-end Android phones
+- mobile networks
+- slower connections
+
+Avoid unnecessary animations and huge assets.
+
+ADMIN DATA QUALITY
+
+Create tools to:
+- normalize Bangla/English location names
+- normalize prices
+- normalize sqft/katha
+- detect missing fields
+- identify impossible values
+- identify stale listings
+- identify duplicate listings
+
+BANGLADESH LOCATION DATA
+
+Support:
+- divisions
+- districts
+- upazilas/thanas
+- major Dhaka neighborhoods
+- major Chattogram neighborhoods
+- major property markets across Bangladesh
+
+Do not hardcode everything into frontend components.
+
+Use database-driven location data.
+
+ANALYTICS
+
+Track:
+- searches
+- most searched areas
+- most searched property types
+- price ranges
+- clicks on listings
+- source click-through rate
+- saved searches
+- inquiries
+- listing freshness
+
+Build analytics so we can later understand what Bangladesh property buyers actually want.
+
+MONETIZATION ARCHITECTURE
+
+Do not aggressively monetize the MVP.
+
+Design future support for:
+- featured listings
+- agent subscriptions
+- agency plans
+- developer packages
+- lead generation
+- advertising
+
+Do not implement payment unless specifically requested.
+
+TEST DATA
+
+Create realistic Bangladesh test listings for:
+- Dhaka
+- Uttara
+- Bashundhara
+- Mirpur
+- Dhanmondi
+- Mohammadpur
+- Gulshan
+- Banani
+- Chattogram
+- Sylhet
+
+Clearly mark test/demo data internally so it can be removed later.
+
+IMPORTANT DEVELOPMENT RULE
+
+Do not attempt the whole project in one giant implementation.
+
+Build in incremental phases.
+
+PHASE 1
+Project setup
+Database
+Supabase
+Authentication foundation
+Design system
+Layout
+Home page
+Basic location data
+
+PHASE 2
+Search
+Filters
+Property cards
+Property details
+Pagination
+
+PHASE 3
+Maps
+Favorites
+Saved searches
+SEO
+
+PHASE 4
+Admin dashboard
+Listing moderation
+Source management
+Manual CSV import
+
+PHASE 5
+External-source ingestion architecture
+Source adapters
+Freshness
+Change tracking
+
+PHASE 6
+Duplicate detection
+Claim property
+Verification
+
+PHASE 7
+Owner/agent listing creation
+Inquiry system
+Agent dashboard
+
+PHASE 8
+Production hardening
+Security
+Performance
+SEO
+Analytics
+Deployment
+
+For each phase:
+1. inspect the current code
+2. implement only the requested phase
+3. do not unnecessarily rewrite working components
+4. test the implementation
+5. fix errors
+6. explain exactly what changed
+7. provide the next recommended prompt
+
+Start with PHASE 1 only.
+
+Do not implement external scraping yet.
+
+First create a clean, working foundation.
