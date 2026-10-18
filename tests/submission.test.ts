@@ -18,11 +18,14 @@ const flat: SubmissionInput = {
   sizeSqft: "1250",
   bedrooms: "3",
   bathrooms: "2",
+  balconies: "2",
   floorNumber: "4",
   totalFloors: "6",
+  furnishing: "semi_furnished",
+  parkingSpaces: "0",
   amenities: ["lift"],
-  title: "",
-  description: "South-facing flat near the park.",
+  title: "South-facing 3 bed flat in Uttara",
+  description: "South-facing flat near the park, five minutes from the main road.",
   listerType: "owner",
   contactName: "Rahim",
   phone: "+880 1712-345678",
@@ -116,5 +119,47 @@ describe("phone choices", () => {
     const parsed = submissionSchema.parse({ ...flat, showPhone: true, hasWhatsapp: true });
     expect(parsed.showPhone).toBe(true);
     expect(parsed.hasWhatsapp).toBe(true);
+  });
+});
+
+describe("required fields", () => {
+  it("needs an address, a real title and a real description", () => {
+    const errors = errorsFor({ addressLine: " ", title: "ফ্ল্যাট", description: "ভালো ফ্ল্যাট" });
+    expect(errors).toHaveProperty("addressLine");
+    expect(errors).toHaveProperty("title");
+    expect(errors).toHaveProperty("description");
+  });
+
+  it("needs every fact shown for a flat, but 0 is a fine answer", () => {
+    for (const key of ["sizeSqft", "bathrooms", "balconies", "floorNumber", "totalFloors", "parkingSpaces"]) {
+      expect(errorsFor({ [key]: "" }), key).toHaveProperty(key);
+    }
+    expect(errorsFor({ furnishing: undefined })).toHaveProperty("furnishing");
+    expect(errorsFor({ balconies: "০", parkingSpaces: "0" })).toEqual({});
+  });
+
+  it("does not ask which floor a whole house is on, and drops it if sent", () => {
+    const house = { propertyType: "house", floorNumber: "" };
+    expect(errorsFor(house)).toEqual({});
+    const parsed = submissionSchema.parse({ ...flat, ...house, floorNumber: "3" });
+    expect(relevantFacts(parsed).floorNumber).toBeUndefined();
+  });
+
+  it("asks a plot only for its size in katha, not flat facts", () => {
+    const plot = {
+      propertyType: "plot",
+      purpose: "sale",
+      price: "5000000",
+      landSizeKatha: "3",
+      sizeSqft: "",
+      bedrooms: "",
+      bathrooms: "",
+      balconies: "",
+      floorNumber: "",
+      totalFloors: "",
+      furnishing: undefined,
+      parkingSpaces: "",
+    };
+    expect(errorsFor(plot)).toEqual({});
   });
 });

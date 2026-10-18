@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { categoryOf, FURNISHING_LEVELS, PROPERTY_TYPES, PURPOSES } from "@/lib/domain/types";
+import { categoryOf, FURNISHING_LEVELS, PROPERTY_TYPES, PURPOSES, type PropertyType } from "@/lib/domain/types";
 import { fromBnDigits } from "@/lib/format/bn";
 import { bn } from "@/lib/i18n/bn";
 
@@ -40,15 +40,23 @@ const optionalInt = (min: number, max: number) =>
 const optionalDecimal = (min: number, max: number) =>
   z.preprocess((value) => (blank(value) === "" || value === undefined || value === null ? undefined : blank(value)),
     z.coerce.number({ error: e.number }).min(min, e.number).max(max, e.number).optional());
-const optionalText = (max: number) =>
-  z.preprocess((value) => (typeof value === "string" ? value.trim() : ""), z.string().max(max, e.tooLong));
+const requiredText = (min: number, max: number, short: string) =>
+  z.preprocess((value) => (typeof value === "string" ? value.trim() : ""), z.string().min(min, short).max(max, e.tooLong));
+
+/** Whole houses and duplexes have no "which floor": only the building's total floors. */
+export function hasFloorNumber(type: PropertyType): boolean {
+  return categoryOf(type) !== "land" && type !== "house" && type !== "duplex";
+}
+
+/** At least one photo is required. Checked in the browser, where the photos are. */
+export const MIN_PHOTOS = 1;
 
 export const submissionSchema = z
   .object({
     purpose: z.enum(PURPOSES, { error: e.required }),
     propertyType: z.enum(PROPERTY_TYPES, { error: e.required }),
     locationSlug: z.string({ error: e.chooseLocation }).regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, e.chooseLocation),
-    addressLine: optionalText(300),
+    addressLine: requiredText(5, 300, e.address),
     price: z.preprocess(blank, z.coerce.number({ error: e.price }).int(e.price).positive(e.price).max(PRICE_MAX, e.price)),
     priceNegotiable: z.boolean().default(false),
     sizeSqft: optionalInt(100, 1_000_000),
@@ -61,8 +69,8 @@ export const submissionSchema = z
     furnishing: z.enum(FURNISHING_LEVELS).optional(),
     parkingSpaces: optionalInt(0, 50),
     amenities: z.array(z.string().regex(/^[a-z0-9_]+$/)).max(30).default([]),
-    title: optionalText(120),
-    description: optionalText(2000),
+    title: requiredText(10, 120, e.titleShort),
+    description: requiredText(30, 2000, e.descriptionShort),
     listerType: z.enum(SUBMITTER_TYPES, { error: e.required }),
     contactName: z.preprocess((value) => (typeof value === "string" ? value.trim() : ""), z.string().min(1, e.required).max(80, e.tooLong)),
     phone: z.string({ error: e.phone }).transform((value, ctx) => {
@@ -81,6 +89,19 @@ export const submissionSchema = z
     }
     if (data.price < PRICE_MIN[data.purpose]) ctx.addIssue({ code: "custom", path: ["price"], message: e.priceLow });
     if (category === "land" && !data.landSizeKatha) ctx.addIssue({ code: "custom", path: ["landSizeKatha"], message: e.katha });
+    // Everything the form shows for this kind of property must be filled in (0 is a fine answer).
+    const need = (key: keyof typeof data, message: string) => {
+      if (data[key] === undefined) ctx.addIssue({ code: "custom", path: [key], message });
+    };
+    if (category !== "land") {
+      need("sizeSqft", e.size);
+      need("bathrooms", e.required);
+      need("totalFloors", e.required);
+      need("furnishing", e.choose);
+      need("parkingSpaces", e.zeroOk);
+      if (hasFloorNumber(data.propertyType)) need("floorNumber", e.zeroOk);
+    }
+    if (category === "residential") need("balconies", e.zeroOk);
     if (category === "residential" && data.propertyType !== "room" && data.bedrooms === undefined) {
       ctx.addIssue({ code: "custom", path: ["bedrooms"], message: e.bedrooms });
     }
@@ -115,7 +136,7 @@ export function relevantFacts(data: Submission): Submission {
     bedrooms: residential && data.propertyType !== "room" ? data.bedrooms : undefined,
     bathrooms: category === "land" ? undefined : data.bathrooms,
     balconies: residential ? data.balconies : undefined,
-    floorNumber: category === "land" ? undefined : data.floorNumber,
+    floorNumber: hasFloorNumber(data.propertyType) ? data.floorNumber : undefined,
     totalFloors: category === "land" ? undefined : data.totalFloors,
     furnishing: category === "land" ? undefined : data.furnishing,
     parkingSpaces: category === "land" ? undefined : data.parkingSpaces,

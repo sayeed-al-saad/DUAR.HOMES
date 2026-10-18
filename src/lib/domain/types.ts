@@ -48,6 +48,10 @@ export type ListingStatus = (typeof LISTING_STATUSES)[number];
 /** Statuses anyone may see. Sold and rented stay visible so we never imply availability. */
 export const PUBLIC_LISTING_STATUSES: readonly ListingStatus[] = ["active", "stale", "sold", "rented"];
 
+/** Why a visitor reports a listing. Matches the report_reason enum in the database. */
+export const REPORT_REASONS = ["fraud", "wrong_information", "sold_or_rented", "duplicate", "offensive", "copyright", "privacy", "other"] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];
+
 export const FURNISHING_LEVELS = ["unfurnished", "semi_furnished", "furnished"] as const;
 export type Furnishing = (typeof FURNISHING_LEVELS)[number];
 

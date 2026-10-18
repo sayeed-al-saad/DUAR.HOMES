@@ -1538,6 +1538,71 @@ async function main(): Promise<void> {
     });
 
     // -----------------------------------------------------------------------
+    console.log("\nReporting a listing");
+
+    const reported = (await as(SUPER, () => one<{ id: string }>("select id from public.property_listings where status = 'active' and origin = 'first_party' order by id limit 1"))).id;
+    const fileReport = (actor: Actor, extra = "") =>
+      as(actor, () => rows(`insert into public.reports (listing_id, reason, details${extra ? ", reporter_user_id" : ""}) values ($1, 'fraud', 'অগ্রিম টাকা চেয়েছে'${extra ? ", $2" : ""})`, extra ? [reported, extra] : [reported]));
+    const hintOf = async (work: () => Promise<unknown>) => {
+      try {
+        await work();
+      } catch (error) {
+        return (error as { hint?: string }).hint;
+      }
+      return "accepted";
+    };
+
+    await test("a signed-in report always records the real reporter, and one open report per listing", async () => {
+      await fileReport(ALICE, bob);
+      const mine = await as(ALICE, () => rows<{ reporter_user_id: string; status: string }>("select reporter_user_id, status::text from public.reports where listing_id = $1", [reported]));
+      equal(mine, [{ reporter_user_id: alice, status: "open" }], "alice's report, filed as alice");
+      equal(await hintOf(() => fileReport(ALICE)), "already_reported", "second open report on the same listing");
+      equal((await as(BOB, () => rows("select * from public.reports where listing_id = $1", [reported]))).length, 0, "bob cannot read alice's report");
+    });
+
+    await test("one account can file at most 10 reports a day", async () => {
+      const others = await as(SUPER, () => rows<{ id: string }>("select id from public.property_listings where status = 'active' and id <> $1 order by id limit 10", [reported]));
+      for (const other of others.slice(0, 9)) {
+        await as(BOB, () => rows("insert into public.reports (listing_id, reason) values ($1, 'other')", [other.id]));
+      }
+      await fileReport(BOB);
+      equal(await hintOf(() => as(BOB, () => rows("insert into public.reports (listing_id, reason) values ($1, 'other')", [others[9].id]))), "daily_limit", "11th report");
+    });
+
+    await test("visitors who are not signed in: at most 5 open reports per listing", async () => {
+      for (let n = 0; n < 5; n += 1) await fileReport(ANON);
+      equal(await hintOf(() => fileReport(ANON)), "already_reported", "6th anonymous report");
+    });
+
+    await test("staff close a listing's reports in one step and can take the listing down (then nobody can report it); others cannot", async () => {
+      await denied(ALICE, () => rows("select public.handle_listing_reports($1, 'resolved', null, true)", [reported]), PERMISSION_DENIED);
+      await denied(ANON, () => rows("select public.handle_listing_reports($1, 'resolved', null, true)", [reported]), PERMISSION_DENIED);
+      await denied(MOD, () => rows("select public.handle_listing_reports($1, 'open')", [reported]), "22023");
+      const closed = await as(MOD, () => one<{ n: number }>("select public.handle_listing_reports($1, 'resolved', 'ভুয়া লিস্টিং', true) as n", [reported]));
+      equal(Number(closed.n), 7, "reports closed");
+      const after = await as(SUPER, () =>
+        one<Record<string, unknown>>(
+          `select (select status::text from public.property_listings where id = $1) as listing,
+                  (select count(*)::int from public.reports where listing_id = $1 and status = 'resolved' and resolved_by = $2 and resolution_note = 'ভুয়া লিস্টিং') as resolved`,
+          [reported, mod],
+        ),
+      );
+      equal(after, { listing: "removed", resolved: 7 }, "listing removed, reports resolved by the moderator");
+      await denied(ALICE, () => fileReport(ALICE), PERMISSION_DENIED);
+      await denied(ANON, () => fileReport(ANON), PERMISSION_DENIED);
+      await as(SUPER, () => rows("update public.property_listings set status = 'active' where id = $1", [reported]));
+      equal(await hintOf(() => fileReport(ALICE)), "accepted", "once it is back up, a closed report does not block a new one");
+      await as(SUPER, () => rows("delete from public.reports where listing_id = $1 or reporter_user_id = $2", [reported, bob]));
+    });
+
+    await test("dismissing leaves the listing up", async () => {
+      await fileReport(ALICE);
+      await as(MOD, () => rows("select public.handle_listing_reports($1, 'dismissed')", [reported]));
+      equal(await statusOf(reported), "active", "listing still live");
+      await as(SUPER, () => rows("delete from public.reports where listing_id = $1", [reported]));
+    });
+
+    // -----------------------------------------------------------------------
     console.log("\nRemoving demo data");
 
     await test("remove_demo_data.sql deletes every demo row and nothing else", async () => {

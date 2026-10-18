@@ -89,3 +89,32 @@ Listers can edit their listings; see `docs/editing-listings.md`.
   - the public page shows the photo but no phone or address
   - the listing appears in search; marking it rented removes it
 - An accessibility scan (axe, WCAG 2.1 AA) of all three pages, signed in and signed out, at phone and desktop widths: no violations.
+
+## Required fields
+
+Every field on the listing form is required except amenities and the photo order. That includes the address, title (at least 10 characters), description (at least 30) and at least one photo.
+
+- The title and description boxes show an example as a placeholder.
+- For flats, houses and commercial space, every fact the form shows is required: size, bathrooms, total floors, furnishing and parking, plus balconies for homes. 0 is accepted where a property has none.
+- Floor number is asked only for flats, rooms and commercial units, not for whole houses or duplexes.
+- Land and plots need only their size in katha.
+
+The rules live in `src/lib/listings/submission-schema.ts`, used by both the browser and the server. The photo minimum (`MIN_PHOTOS`) is checked in the browser, where the photos are. Moderators see "ছবি নেই" in the review queue if a listing somehow arrives without one.
+
+## Reports
+
+A visitor can report any listing they can see ("এই লিস্টিংয়ে সমস্যা? রিপোর্ট করুন" under the listing box), signed in or not. Staff handle reports at `/admin/reports`.
+
+- **On the account page:** staff see a link to that page with the number of open reports.
+- **On the reports page:** reports are grouped by listing, the most reported first. Each group shows the reason, details, the reporter's optional contact, and whether they were signed in.
+- **Actions:** "লিস্টিং সরিয়ে দিন" takes the listing down for good (status `removed`). "সমাধান হয়েছে" and "বাদ দিন" close the reports and leave the listing up. All three close every open report on that listing at once, through `handle_listing_reports()`.
+
+Limits, enforced by the database (migration `20261018000300_listing_reports.sql`):
+
+- A signed-in account can file at most 10 reports a day, and only one open report per listing. Its account is always recorded.
+- Visitors who are not signed in can file at most 5 open reports per listing between them, and 30 an hour across the whole site.
+- A listing that has been taken down cannot be reported any more.
+
+## Edited listings in the review queue
+
+A listing waiting for review that was approved before (it has `published_at`) is an edit of a live listing. The queue marks it "সম্পাদিত" and reminds the moderator that rejecting it closes the listing for good.

@@ -18,8 +18,10 @@ import { toBnDigits } from "@/lib/format/bn";
 import { TERMS_PATH } from "@/lib/legal/content";
 import { bn, FURNISHING_LABEL, LISTER_TYPE_LABEL, PROPERTY_TYPE_LABEL, PURPOSE_LABEL } from "@/lib/i18n/bn";
 import {
+  hasFloorNumber,
   MAX_PHOTO_BYTES,
   MAX_PHOTOS,
+  MIN_PHOTOS,
   PHOTO_TYPES,
   SUBMITTER_TYPES,
   submissionErrors,
@@ -251,8 +253,10 @@ export function ListingForm({ popularLocations, amenities, defaultName, edit }: 
     } as unknown as SubmissionInput;
 
     const check = submissionSchema.safeParse(input);
-    if (!check.success) {
-      setErrors({ form: t.errors.fixBelow, ...submissionErrors(check.error) });
+    const noPhotos = photos.length < MIN_PHOTOS;
+    setPhotoError(noPhotos ? t.errors.photoRequired : null);
+    if (!check.success || noPhotos) {
+      setErrors({ form: t.errors.fixBelow, ...(check.success ? {} : submissionErrors(check.error)) });
       formTop.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
@@ -416,15 +420,18 @@ export function ListingForm({ popularLocations, amenities, defaultName, edit }: 
               <Input id="f-balconies" inputMode="numeric" value={fields.balconies as string} onChange={set("balconies")} {...invalid("balconies")} />
             </Field>
           ) : null}
-          <Field id="f-floorNumber" label={t.floor} hint={t.floorHint} error={errors.floorNumber}>
-            <Input id="f-floorNumber" inputMode="numeric" value={fields.floorNumber as string} onChange={set("floorNumber")} {...invalid("floorNumber")} />
-          </Field>
+          {fields.propertyType && hasFloorNumber(fields.propertyType) ? (
+            <Field id="f-floorNumber" label={t.floor} hint={t.floorHint} error={errors.floorNumber}>
+              <Input id="f-floorNumber" inputMode="numeric" value={fields.floorNumber as string} onChange={set("floorNumber")} {...invalid("floorNumber")} />
+            </Field>
+          ) : null}
           <Field id="f-totalFloors" label={t.totalFloors} error={errors.totalFloors}>
             <Input id="f-totalFloors" inputMode="numeric" value={fields.totalFloors as string} onChange={set("totalFloors")} {...invalid("totalFloors")} />
           </Field>
-          <Field id="f-furnishing" label={t.furnishing}>
+          <Field id="f-furnishing" label={t.furnishing} error={errors.furnishing}>
             <NativeSelect
               id="f-furnishing"
+              {...invalid("furnishing")}
               value={fields.furnishing ?? ""}
               onChange={(event) => setFields((current) => ({ ...current, furnishing: (event.target.value || undefined) as Fields["furnishing"] }))}
             >
@@ -504,12 +511,16 @@ export function ListingForm({ popularLocations, amenities, defaultName, edit }: 
             />
           </label>
         ) : null}
-        {photoError ? <p className="mt-2 text-sm text-destructive">{photoError}</p> : null}
+        {photoError ? (
+          <p role="alert" className="mt-2 text-sm text-destructive">
+            {photoError}
+          </p>
+        ) : null}
       </section>
 
       <Section id="s-about" title={t.sections.about}>
         <Field id="f-title" label={t.titleLabel} hint={t.titleHint} error={errors.title} className="sm:col-span-2">
-          <Input id="f-title" value={fields.title as string} onChange={set("title")} maxLength={120} {...invalid("title")} />
+          <Input id="f-title" value={fields.title as string} onChange={set("title")} maxLength={120} placeholder={t.titlePlaceholder} {...invalid("title")} />
         </Field>
         <Field id="f-description" label={t.description} hint={t.descriptionHint} error={errors.description} className="sm:col-span-2">
           <textarea
@@ -518,6 +529,7 @@ export function ListingForm({ popularLocations, amenities, defaultName, edit }: 
             onChange={set("description")}
             maxLength={2000}
             rows={5}
+            placeholder={t.descriptionPlaceholder}
             className="w-full rounded-lg border border-input bg-background px-3.5 py-2.5 text-base focus-visible:border-ring focus-visible:outline-2 focus-visible:outline-ring aria-invalid:border-destructive"
             {...invalid("description")}
           />

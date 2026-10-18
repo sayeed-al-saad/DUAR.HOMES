@@ -9,7 +9,9 @@ import Link from "next/link";
 import { isStaff } from "@/lib/auth/roles";
 import { requireUser } from "@/lib/auth/session";
 import { isSupabaseConfigured } from "@/lib/env";
+import { toBnDigits } from "@/lib/format/bn";
 import { bn } from "@/lib/i18n/bn";
+import { countOpenReports } from "@/lib/reports/server";
 
 export const metadata: Metadata = { title: bn.account.title, robots: { index: false } };
 
@@ -40,6 +42,7 @@ async function AccountDetails() {
     : null;
 
   const rows: Array<[label: string, value: string]> = [[bn.account.role, bn.roles[user.role]]];
+  const openReports = isStaff(user.role) ? await countOpenReports() : 0;
   if (user.email) rows.unshift([bn.account.email, user.email]);
   if (memberSince) rows.push([bn.account.memberSince, memberSince]);
 
@@ -73,6 +76,9 @@ async function AccountDetails() {
             </Button>
             <Button asChild variant="outline">
               <Link href="/admin/duplicates">{bn.account.duplicatesLink}</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/admin/reports">{openReports > 0 ? bn.reports.link(toBnDigits(openReports)) : bn.reports.linkNone}</Link>
             </Button>
           </>
         ) : null}

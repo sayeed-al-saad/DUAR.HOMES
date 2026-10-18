@@ -175,6 +175,8 @@ export async function setOwnListingStatus(user: CurrentUser, listingId: string, 
 }
 
 export interface PendingListing extends OwnListing {
+  /** Approved before: this is an edit of a live listing, not a new one. */
+  wasPublished: boolean;
   addressLine: string | null;
   contactName: string | null;
   phone: string | null;
@@ -187,7 +189,7 @@ export async function getPendingListings(): Promise<PendingListing[]> {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
     .from("my_listings")
-    .select(`${OWN_COLUMNS}, property_id, size_sqft, land_size_katha, bedrooms, bathrooms`)
+    .select(`${OWN_COLUMNS}, property_id, size_sqft, land_size_katha, bedrooms, bathrooms, published_at`)
     .eq("status", "pending_review")
     .order("submitted_at", { ascending: true })
     .limit(100);
@@ -210,6 +212,7 @@ export async function getPendingListings(): Promise<PendingListing[]> {
     const address = addressBy.get(String(row.property_id));
     return {
       ...toOwn(row),
+      wasPublished: row.published_at !== null && row.published_at !== undefined,
       addressLine: typeof address?.address_line === "string" ? address.address_line : null,
       contactName: typeof contact?.contact_name === "string" ? contact.contact_name : null,
       phone: typeof contact?.phone === "string" ? contact.phone : null,
