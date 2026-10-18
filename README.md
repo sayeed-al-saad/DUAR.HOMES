@@ -40,6 +40,8 @@ Open http://localhost:3000. With no configuration the site runs in **demo mode**
    where id = (select id from auth.users where email = 'you@example.com');
    ```
 
+Set `NEXT_PUBLIC_CONTACT_EMAIL` to an address that receives mail (default `hello@duar.homes`). The footer, the privacy policy (`/privacy`) and the terms (`/terms`) tell people to send privacy requests and reports there. The text of both pages is in `src/lib/legal/content.ts`; update it whenever the site starts collecting or sharing something new.
+
 Before launch, run `supabase/remove_demo_data.sql` once. It deletes every demo row and nothing else.
 
 To work against a local Supabase stack instead (needs Docker): `npx supabase start`, then `npx supabase db reset`, which applies the migrations and the seed. `npx supabase status` prints the URL and keys for `.env.local`.

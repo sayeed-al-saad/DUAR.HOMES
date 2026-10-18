@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { getAllLocations, getAreaModeCounts, getDataTimestamp, getIndexableListings, getPriceGuide } from "@/lib/data";
 import { countFor, hasAreaPage, isIndexable } from "@/lib/domain/area-pages";
 import { areaPath, listingPath, PRICE_GUIDE_PATH, SEARCH_MODES } from "@/lib/domain/urls";
+import { PRIVACY_PATH, TERMS_PATH } from "@/lib/legal/content";
 import { absoluteUrl } from "@/lib/seo/structured-data";
 
 /**
@@ -21,6 +22,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const entries: MetadataRoute.Sitemap = [{ url: absoluteUrl("/"), lastModified: stamp, changeFrequency: "daily", priority: 1 }];
 
   entries.push({ url: absoluteUrl("/list-property"), lastModified: stamp, changeFrequency: "monthly", priority: 0.6 });
+  for (const path of [PRIVACY_PATH, TERMS_PATH]) {
+    entries.push({ url: absoluteUrl(path), changeFrequency: "yearly", priority: 0.2 });
+  }
 
   const guideHasRealData = guide.length > 0 && !guide.some((row) => row.containsDemoData);
   if (guideHasRealData) {

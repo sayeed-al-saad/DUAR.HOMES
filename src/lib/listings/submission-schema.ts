@@ -70,6 +70,8 @@ export const submissionSchema = z
       if (!phone) ctx.addIssue({ code: "custom", message: e.phone });
       return phone ?? "";
     }),
+    showPhone: z.boolean().default(false),
+    hasWhatsapp: z.boolean().default(false),
     agree: z.literal(true, { error: e.agree }),
   })
   .superRefine((data, ctx) => {

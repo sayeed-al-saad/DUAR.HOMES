@@ -104,3 +104,17 @@ describe("relevantFacts", () => {
     expect(land.floorNumber).toBeUndefined();
   });
 });
+
+describe("phone choices", () => {
+  it("keep the number hidden unless the lister says otherwise", () => {
+    const parsed = submissionSchema.parse(flat);
+    expect(parsed.showPhone).toBe(false);
+    expect(parsed.hasWhatsapp).toBe(false);
+  });
+
+  it("pass the lister's choices through", () => {
+    const parsed = submissionSchema.parse({ ...flat, showPhone: true, hasWhatsapp: true });
+    expect(parsed.showPhone).toBe(true);
+    expect(parsed.hasWhatsapp).toBe(true);
+  });
+});

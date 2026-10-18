@@ -4,6 +4,7 @@ import { siteConfig } from "@/lib/config/site";
 import { CACHE_TAGS, getPopularLocations } from "@/lib/data";
 import { areaPath, PRICE_GUIDE_PATH, searchPath, type SearchMode } from "@/lib/domain/urls";
 import { toBnDigits } from "@/lib/format/bn";
+import { PRIVACY_PATH, TERMS_PATH } from "@/lib/legal/content";
 import { bn } from "@/lib/i18n/bn";
 import { LogoMark } from "./logo";
 
@@ -71,7 +72,29 @@ export async function SiteFooter() {
       </div>
 
       <div className="border-t border-line">
-        <p className="page-shell py-5 text-sm text-slate">{bn.footer.rights(year, siteConfig.name)}</p>
+        <div className="page-shell flex flex-col gap-3 py-5 text-sm text-slate sm:flex-row sm:items-center sm:justify-between">
+          <p>{bn.footer.rights(year, siteConfig.name)}</p>
+          <nav aria-label={bn.footer.legal}>
+            <ul className="flex flex-wrap gap-x-5 gap-y-1.5">
+              <li>
+                <Link href={PRIVACY_PATH} className="hover:text-ink hover:underline">
+                  {bn.legal.privacyLink}
+                </Link>
+              </li>
+              <li>
+                <Link href={TERMS_PATH} className="hover:text-ink hover:underline">
+                  {bn.legal.termsLink}
+                </Link>
+              </li>
+              <li>
+                <a href={`mailto:${siteConfig.contactEmail}`} className="hover:text-ink hover:underline">
+                  {bn.footer.contact}
+                  <span className="sr-only">{`: ${siteConfig.contactEmail}`}</span>
+                </a>
+              </li>
+            </ul>
+          </nav>
+        </div>
       </div>
     </footer>
   );

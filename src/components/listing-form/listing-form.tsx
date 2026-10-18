@@ -1,8 +1,10 @@
 "use client";
 
 import { ImagePlus, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { saveListingPhotosAction, updateListingAction } from "@/app/account/listings/actions";
 import { attachListingPhotos, submitListingAction } from "@/app/list-property/actions";
 import { LocationCombobox } from "@/components/location/location-combobox";
 import { Alert } from "@/components/ui/alert";
@@ -10,8 +12,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import type { LocationSummary } from "@/lib/data/types";
+import type { EditableListing } from "@/lib/listings/server";
 import { categoryOf, FURNISHING_LEVELS, PROPERTY_TYPES, type PropertyType, type Purpose } from "@/lib/domain/types";
 import { toBnDigits } from "@/lib/format/bn";
+import { TERMS_PATH } from "@/lib/legal/content";
 import { bn, FURNISHING_LABEL, LISTER_TYPE_LABEL, PROPERTY_TYPE_LABEL, PURPOSE_LABEL } from "@/lib/i18n/bn";
 import {
   MAX_PHOTO_BYTES,
@@ -32,37 +36,57 @@ interface ListingFormProps {
   popularLocations: LocationSummary[];
   amenities: Array<{ slug: string; nameBn: string }>;
   defaultName: string;
+  /** Present when editing an existing listing. */
+  edit?: {
+    listingId: string;
+    status: EditableListing["status"];
+    values: EditableListing["values"];
+    location: LocationSummary | null;
+    photos: EditableListing["photos"];
+  };
 }
 
-type Fields = Omit<SubmissionInput, "amenities" | "priceNegotiable" | "agree" | "purpose" | "propertyType" | "listerType"> & {
+type Fields = Omit<SubmissionInput, "amenities" | "priceNegotiable" | "agree" | "showPhone" | "hasWhatsapp" | "purpose" | "propertyType" | "listerType"> & {
   purpose: Purpose | "";
   propertyType: PropertyType | "";
   listerType: (typeof SUBMITTER_TYPES)[number] | "";
 };
 
+/** A photo in the form: either already on the listing (existingId) or a new file to upload. */
 interface Photo {
   id: string;
-  file: File;
   preview: string;
+  file?: File;
+  existingId?: string;
 }
 
-/** Shrinks a photo to at most 1600 px wide and re-encodes it as WebP: far less to upload on mobile data. */
-async function shrink(file: File): Promise<{ blob: Blob; ext: string; type: string }> {
+/**
+ * Redraws a photo on a canvas and saves the copy. Only the pixels survive,
+ * so the camera's hidden data (GPS location, phone model, date) is dropped.
+ * The original file is never uploaded: it may hold the house's exact
+ * location, which the site keeps private. Returns null if the photo cannot
+ * be redrawn; that photo is then skipped and the lister is told.
+ */
+async function shrink(file: File): Promise<{ blob: Blob; ext: string; type: string } | null> {
   try {
     const bitmap = await createImageBitmap(file);
     const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(bitmap.width * scale);
     canvas.height = Math.round(bitmap.height * scale);
-    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.82));
-    if (blob && blob.size < file.size) return { blob, ext: "webp", type: "image/webp" };
+    const webp = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.82));
+    if (webp && webp.type === "image/webp") return { blob: webp, ext: "webp", type: "image/webp" };
+    // Browsers without WebP encoding fall back to JPEG, still redrawn.
+    const jpeg = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    if (jpeg) return { blob: jpeg, ext: "jpg", type: "image/jpeg" };
   } catch {
-    // Fall back to the original file.
+    // Unreadable image: skip it.
   }
-  const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
-  return { blob: file, ext, type: file.type };
+  return null;
 }
 
 function Field({ id, label, hint, error, children, className }: { id: string; label: string; hint?: string; error?: string; children: ReactNode; className?: string }) {
@@ -102,9 +126,33 @@ function Section({ id, title, children }: { id: string; title: string; children:
  * a server action, then the photos go from the browser straight to storage
  * (no large uploads through the site) and are recorded against the listing.
  */
-export function ListingForm({ popularLocations, amenities, defaultName }: ListingFormProps) {
+export function ListingForm({ popularLocations, amenities, defaultName, edit }: ListingFormProps) {
   const router = useRouter();
-  const [fields, setFields] = useState<Fields>({
+  const start = edit?.values;
+  const [fields, setFields] = useState<Fields>(
+    start
+      ? {
+          purpose: start.purpose,
+          propertyType: start.propertyType,
+          locationSlug: edit.location?.slug ?? "",
+          addressLine: start.addressLine,
+          price: start.price,
+          sizeSqft: start.sizeSqft,
+          landSizeKatha: start.landSizeKatha,
+          bedrooms: start.bedrooms,
+          bathrooms: start.bathrooms,
+          balconies: start.balconies,
+          floorNumber: start.floorNumber,
+          totalFloors: start.totalFloors,
+          furnishing: (start.furnishing || undefined) as Fields["furnishing"],
+          parkingSpaces: start.parkingSpaces,
+          title: start.title,
+          description: start.description,
+          listerType: (SUBMITTER_TYPES as readonly string[]).includes(start.listerType) ? (start.listerType as Fields["listerType"]) : "owner",
+          contactName: start.contactName,
+          phone: start.phone,
+        }
+      : {
     purpose: "",
     propertyType: "",
     locationSlug: "",
@@ -124,13 +172,18 @@ export function ListingForm({ popularLocations, amenities, defaultName }: Listin
     listerType: "owner",
     contactName: defaultName,
     phone: "",
-  });
-  const [location, setLocation] = useState<LocationSummary | null>(null);
-  const [locationText, setLocationText] = useState("");
-  const [negotiable, setNegotiable] = useState(false);
+        },
+  );
+  const [location, setLocation] = useState<LocationSummary | null>(edit?.location ?? null);
+  const [locationText, setLocationText] = useState(edit?.location?.nameBn ?? "");
+  const [negotiable, setNegotiable] = useState(start?.priceNegotiable ?? false);
   const [agree, setAgree] = useState(false);
-  const [chosen, setChosen] = useState<string[]>([]);
-  const [photos, setPhotos] = useState<Photo[]>([]);
+  const [showPhone, setShowPhone] = useState(start?.showPhone ?? true);
+  const [hasWhatsapp, setHasWhatsapp] = useState(start?.hasWhatsapp ?? false);
+  const [chosen, setChosen] = useState<string[]>(start?.amenities ?? []);
+  const [photos, setPhotos] = useState<Photo[]>(
+    () => edit?.photos.map((photo) => ({ id: photo.id, preview: photo.url, existingId: photo.id })) ?? [],
+  );
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [errors, setErrors] = useState<SubmissionErrors>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -172,10 +225,12 @@ export function ListingForm({ popularLocations, amenities, defaultName }: Listin
   async function uploadPhotos(userId: string, listingId: string): Promise<string[]> {
     const supabase = getSupabaseBrowserClient();
     const paths: string[] = [];
-    for (const [index, photo] of photos.entries()) {
-      setBusy(t.uploading(toBnDigits(index + 1), toBnDigits(photos.length)));
-      const { blob, ext, type } = await shrink(photo.file);
-      if (blob.size > MAX_PHOTO_BYTES) continue;
+    const fresh = photos.filter((photo): photo is Photo & { file: File } => photo.file !== undefined);
+    for (const [index, photo] of fresh.entries()) {
+      setBusy(t.uploading(toBnDigits(index + 1), toBnDigits(fresh.length)));
+      const copy = await shrink(photo.file);
+      if (!copy || copy.blob.size > MAX_PHOTO_BYTES) continue;
+      const { blob, ext, type } = copy;
       const path = `${userId}/${listingId}/${index + 1}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
       const { error } = await supabase.storage.from("listing-images").upload(path, blob, { contentType: type, upsert: false });
       if (!error) paths.push(path);
@@ -189,6 +244,8 @@ export function ListingForm({ popularLocations, amenities, defaultName }: Listin
       ...fields,
       locationSlug: location?.slug ?? "",
       priceNegotiable: negotiable,
+      showPhone,
+      hasWhatsapp,
       amenities: chosen,
       agree,
     } as unknown as SubmissionInput;
@@ -201,6 +258,10 @@ export function ListingForm({ popularLocations, amenities, defaultName }: Listin
     }
 
     setErrors({});
+    if (edit) {
+      await saveEdit(input);
+      return;
+    }
     setBusy(t.submitting);
     try {
       const result = await submitListingAction(input);
@@ -216,6 +277,36 @@ export function ListingForm({ popularLocations, amenities, defaultName }: Listin
         photosOk = attached === photos.length;
       }
       router.push(`/account/listings?submitted=${photosOk ? "1" : "photos"}`);
+    } catch {
+      setErrors({ form: t.errors.generic });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Edit mode: save the form, then the photos if they changed, then go back to "my listings". */
+  async function saveEdit(input: SubmissionInput) {
+    if (!edit) return;
+    setBusy(bn.editListing.saving);
+    try {
+      const result = await updateListingAction(edit.listingId, input);
+      if (result.status === "error") {
+        setErrors(result.errors);
+        formTop.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      const keep = photos.flatMap((photo) => (photo.existingId ? [photo.existingId] : []));
+      const fresh = photos.filter((photo) => photo.file !== undefined);
+      const photosChanged = fresh.length > 0 || keep.join() !== edit.photos.map((photo) => photo.id).join();
+      let photosOk = true;
+      if (photosChanged) {
+        const paths = fresh.length > 0 ? await uploadPhotos(result.userId, edit.listingId) : [];
+        const count = await saveListingPhotosAction(edit.listingId, keep, paths, String(fields.title ?? ""));
+        photosOk = count === keep.length + fresh.length;
+      }
+      const nowStatus = photosChanged && result.listingStatus === "active" ? "pending_review" : result.listingStatus;
+      const outcome = !photosOk ? "photos" : edit.status !== "active" ? "pending" : nowStatus === "active" ? "live" : "review";
+      router.push(`/account/listings?edited=${outcome}`);
     } catch {
       setErrors({ form: t.errors.generic });
     } finally {
@@ -383,7 +474,7 @@ export function ListingForm({ popularLocations, amenities, defaultName }: Listin
           <ul className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4">
             {photos.map((photo, index) => (
               <li key={photo.id} className="relative aspect-[4/3] overflow-hidden rounded-lg bg-cloud">
-                {/* eslint-disable-next-line @next/next/no-img-element -- a local preview of a file not yet uploaded */}
+                {/* eslint-disable-next-line @next/next/no-img-element -- a local preview, or a photo already on the listing */}
                 <img src={photo.preview} alt="" className="size-full object-cover" />
                 <button
                   type="button"
@@ -449,16 +540,44 @@ export function ListingForm({ popularLocations, amenities, defaultName }: Listin
         <Field id="f-phone" label={t.phone} hint={t.phoneHint} error={errors.phone}>
           <Input id="f-phone" type="tel" inputMode="tel" value={fields.phone as string} onChange={set("phone")} autoComplete="tel" {...invalid("phone")} />
         </Field>
+        <div className="space-y-3 sm:col-span-2">
+          <label className="flex cursor-pointer items-start gap-3 text-sm">
+            <input type="checkbox" checked={hasWhatsapp} onChange={(event) => setHasWhatsapp(event.target.checked)} className="mt-0.5 size-5 shrink-0 accent-indigo" />
+            {bn.contact.hasWhatsapp}
+          </label>
+          <label className="flex cursor-pointer items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={showPhone}
+              onChange={(event) => setShowPhone(event.target.checked)}
+              aria-describedby="f-showPhone-hint"
+              className="mt-0.5 size-5 shrink-0 accent-indigo"
+            />
+            <span>
+              <span className="font-bold">{bn.contact.showPhone}</span>
+              <span id="f-showPhone-hint" className="mt-0.5 block text-slate">
+                {bn.contact.showPhoneHint}
+              </span>
+            </span>
+          </label>
+        </div>
       </Section>
 
       <div className="rounded-2xl bg-cloud p-4 sm:p-6">
         <label className="flex cursor-pointer items-start gap-3 text-sm">
           <input type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} className="mt-0.5 size-5 shrink-0 accent-indigo" />
-          {t.agree}
+          <span>
+            {t.agree} {bn.legal.listingAgree.before}{" "}
+            <Link href={TERMS_PATH} target="_blank" className="font-bold text-primary underline underline-offset-4">
+              {bn.legal.termsLink}
+              <span className="sr-only"> {bn.legal.opensNewTab}</span>
+            </Link>{" "}
+            {bn.legal.listingAgree.after}
+          </span>
         </label>
         {errors.agree ? <p className="mt-1 text-sm text-destructive">{errors.agree}</p> : null}
         <Button type="submit" variant="flame" size="lg" className="mt-5 w-full sm:w-auto" disabled={busy !== null}>
-          {busy ?? t.submit}
+          {busy ?? (edit ? bn.editListing.save : t.submit)}
         </Button>
       </div>
     </form>

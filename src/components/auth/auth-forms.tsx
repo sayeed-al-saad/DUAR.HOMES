@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { bn } from "@/lib/i18n/bn";
+import { PRIVACY_PATH, TERMS_PATH } from "@/lib/legal/content";
 
 const IDLE: AuthFormState = { status: "idle" };
 
@@ -164,6 +165,20 @@ export function SignupForm({ next }: { next: string }) {
           </p>
         )}
       </div>
+
+      <p className="text-sm text-slate">
+        {bn.legal.signupAgree.before}{" "}
+        <Link href={TERMS_PATH} target="_blank" className="font-bold text-primary underline underline-offset-4">
+          {bn.legal.termsLink}
+          <span className="sr-only"> {bn.legal.opensNewTab}</span>
+        </Link>{" "}
+        {bn.legal.signupAgree.and}{" "}
+        <Link href={PRIVACY_PATH} target="_blank" className="font-bold text-primary underline underline-offset-4">
+          {bn.legal.privacyLink}
+          <span className="sr-only"> {bn.legal.opensNewTab}</span>
+        </Link>{" "}
+        {bn.legal.signupAgree.after}
+      </p>
 
       <Button type="submit" size="lg" className="w-full" disabled={pending}>
         {pending ? bn.auth.signupPending : bn.auth.signupButton}

@@ -8,6 +8,7 @@ import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { locationLine } from "@/components/listings/listing-card";
 import { ListingGrid } from "@/components/listings/listing-grid";
 import { OtherListings } from "@/components/listings/other-listings";
+import { ContactSafety, ContactSlot, ContactSlotFallback } from "@/components/contact/contact-slot";
 import { SaveSlot, SaveSlotFallback } from "@/components/saved/save-slot";
 import { ListingMedia } from "@/components/listings/listing-media";
 import { ListingPrice } from "@/components/listings/listing-price";
@@ -333,9 +334,14 @@ async function ListingBody({ params }: Pick<Props, "params">) {
                   <ExternalLink aria-hidden className="size-4" />
                 </a>
               </Button>
-            ) : (
-              <p className="mt-3 rounded-lg bg-cloud px-3 py-2 text-sm">{bn.listingPage.contactSoon}</p>
-            )}
+            ) : listing.status === "active" ? (
+              <div className="mt-4">
+                <Suspense fallback={<ContactSlotFallback />}>
+                  <ContactSlot listingId={listing.id} path={listingPath(listing)} isDemo={listing.isDemo} />
+                </Suspense>
+                <ContactSafety />
+              </div>
+            ) : null}
 
             {listing.status === "active" ? (
               <div className="mt-4">

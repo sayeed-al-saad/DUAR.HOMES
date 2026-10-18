@@ -46,7 +46,7 @@ Migration `20261008001200_listing_submissions.sql`, on top of the existing guard
   - Every existing rule applies: the lister is set to the caller, and the status is forced to `pending_review`.
   - The place must be an area or city, not a division or district.
 - **The map never shows the house.** The stored point is the area's centre, with `location_precision = 'area_only'`.
-- **Phone numbers and addresses stay private.** The phone goes to `listing_contacts` with `show_phone = false`, and the exact address goes to `property_private`. Only the lister and staff can read either. Neither appears on public pages, in public views or in the API.
+- **Phone numbers and addresses stay private.** The phone goes to `listing_contacts`, and the exact address goes to `property_private`. Only the lister and staff can read either table. Neither appears on public pages, in public views or in the API. The only way anyone else gets the number is `reveal_listing_phone()`; see `docs/contact-lister.md`.
 - **Photo rows are checked by `enforce_own_listing_photo`.** Every photo row on a listing made here must:
   - be owned or licensed
   - be a file that exists in `listing-images`, in the lister's folder for that listing
@@ -57,9 +57,12 @@ Migration `20261008001200_listing_submissions.sql`, on top of the existing guard
 
 Public pages also accept only image URLs from `/demo/` or our own `listing-images` bucket (`safeImageUrl`).
 
+## Editing
+
+Listers can edit their listings; see `docs/editing-listings.md`.
+
 ## Not built yet
 
-- **Showing the phone number to buyers.** `show_phone` stays off. That needs a contact feature with spam protection, which is a later phase.
 - **Editing a listing after submitting it.** For now the lister removes it and submits a new one.
 - **Email to the lister when their listing is approved or rejected.**
 - **A reason shown to the lister when a listing is rejected.**
