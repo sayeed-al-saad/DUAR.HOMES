@@ -9,6 +9,8 @@ import { locationLine } from "@/components/listings/listing-card";
 import { ListingGrid } from "@/components/listings/listing-grid";
 import { OtherListings } from "@/components/listings/other-listings";
 import { ContactSafety, ContactSlot, ContactSlotFallback } from "@/components/contact/contact-slot";
+import { isSupabaseConfigured } from "@/lib/env";
+import { ReportListing } from "@/components/reports/report-listing";
 import { SaveSlot, SaveSlotFallback } from "@/components/saved/save-slot";
 import { ListingMedia } from "@/components/listings/listing-media";
 import { ListingPrice } from "@/components/listings/listing-price";
@@ -360,6 +362,11 @@ async function ListingBody({ params }: Pick<Props, "params">) {
               <p className="pt-2 text-xs text-slate">{bn.listingPage.availabilityNote}</p>
             </div>
           </div>
+          {isSupabaseConfigured ? (
+            <div className="mt-4">
+              <ReportListing listingId={listing.id} />
+            </div>
+          ) : null}
         </aside>
       </div>
 

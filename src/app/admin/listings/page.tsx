@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { AuthNotConfigured } from "@/components/auth/auth-shell";
 import { ReviewActions } from "@/components/listing-form/review-actions";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireRole } from "@/lib/auth/session";
 import { isSupabaseConfigured } from "@/lib/env";
@@ -57,6 +58,12 @@ async function Queue() {
                 {listing.parentLocationNameBn ? `${listing.locationNameBn}, ${listing.parentLocationNameBn}` : listing.locationNameBn} ·{" "}
                 {formatDateBn(listing.submittedAt)}
               </p>
+              {listing.wasPublished ? (
+                <p className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                  <Badge variant="amber">{bn.review.edited}</Badge>
+                  <span className="text-slate">{bn.review.editedHelp}</span>
+                </p>
+              ) : null}
               <h2 className="mt-1 text-xl">{listing.title}</h2>
               <p className="text-lg font-bold">{formatPriceBn(listing.price)}</p>
 
