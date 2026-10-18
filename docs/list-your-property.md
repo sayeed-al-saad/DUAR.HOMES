@@ -118,3 +118,44 @@ Limits, enforced by the database (migration `20261018000300_listing_reports.sql`
 ## Edited listings in the review queue
 
 A listing waiting for review that was approved before (it has `published_at`) is an edit of a live listing. The queue marks it "সম্পাদিত" and reminds the moderator that rejecting it closes the listing for good.
+
+## Video
+
+A lister can add **one video** per listing, next to the photos. It is optional. Limits: **50 MB and 2 minutes**; MP4, MOV (iPhone) or WebM. Migration: `20261018000500_listing_videos.sql`.
+
+**Uploading.** The video goes the same way as photos: from the browser straight to the public `listing-videos` bucket, into `<user id>/<listing id>/`. Before upload, the browser does two things (`src/lib/listings/video.ts`):
+
+- **Removes the filming location.** Phones write it into the video's `moov` box as an ISO 6709 string (iPhone `com.apple.quicktime.location`, Android `©xyz`). Every such string has its digits replaced with zeros. The length stays the same, so the file still plays. Unit tests: `tests/video.test.ts`.
+- **Saves a still frame** from about one second in, as the poster. Visitors see the poster first, and the video only downloads when they press play (`preload="none"`). That saves mobile data and the free plan's bandwidth.
+
+**Rules in the database** (`listing_videos`, one row per listing):
+
+- The file must be the lister's own upload for that listing, in the video bucket.
+- At most 2 minutes, and only on listings made here.
+- Adding, replacing or removing the video of a live listing sends it back to review, like a photo change.
+- The bucket itself refuses files over 50 MB and any other file type.
+
+**Where it shows:**
+
+- **Listing page:** a "ভিডিও" section above the description.
+- **Review queue:** a player, so moderators can check it.
+- **Edit page:** the current video, which the lister can remove or replace. Replaced files are deleted from storage.
+
+**Costs.** Supabase's free plan has 1 GB of storage and 5 GB of downloads a month. At 50 MB per video, that is roughly 20 maximum-size videos of storage. Most phone clips of a minute or less are 10 to 30 MB. Watch Storage in the Supabase dashboard, and move to the Pro plan ($25 a month: 100 GB storage, 250 GB downloads) when it gets close.
+
+**Known limit.** Some phones record HEVC (H.265). A few browsers cannot play it, mostly Chrome on older Android and on Windows. The form refuses a video the lister's own browser cannot open. For best results, MP4 (H.264) works everywhere.
+
+## Areas
+
+`src/data/locations.ts` lists:
+
+- 150 neighbourhoods in Dhaka city, including Mirpur sections 1 to 14, Old Dhaka, Badda/Vatara, Mohammadpur housing areas and the airport side
+- 38 in Chattogram
+- 28 in Sylhet
+
+Uttara sectors are search spellings of Uttara, not separate areas. Coordinates are approximate area centres, used only to place map pins.
+
+Adding more areas:
+
+1. Edit the file and run `npm run db:generate`.
+2. Copy the regenerated `insert into public.locations …` statement into a new migration, as `20261018000400_more_areas.sql` does, so existing databases get the new rows too.

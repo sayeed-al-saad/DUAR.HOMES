@@ -78,7 +78,7 @@ async function EditForm({ params }: Pick<PageProps<"/account/listings/[id]/edit"
         popularLocations={popularLocations}
         amenities={amenities}
         defaultName={user.displayName ?? ""}
-        edit={{ listingId: listing.id, status: listing.status, values: listing.values, location, photos: listing.photos }}
+        edit={{ listingId: listing.id, status: listing.status, values: listing.values, location, photos: listing.photos, video: listing.video }}
       />
     </>
   );

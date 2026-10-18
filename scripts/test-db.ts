@@ -167,7 +167,7 @@ async function main(): Promise<void> {
         `select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace
          where n.nspname = 'public' and c.relkind = 'r'`,
       );
-      equal(Number(total.count), 23, "table count");
+      equal(Number(total.count), 24, "table count");
     });
 
     await test("every foreign key is indexed, and no table has overlapping policies for one role", async () => {
@@ -1600,6 +1600,72 @@ async function main(): Promise<void> {
       await as(MOD, () => rows("select public.handle_listing_reports($1, 'dismissed')", [reported]));
       equal(await statusOf(reported), "active", "listing still live");
       await as(SUPER, () => rows("delete from public.reports where listing_id = $1", [reported]));
+    });
+
+    // -----------------------------------------------------------------------
+    console.log("\nListing videos");
+
+    const filmed = (await submit(BOB, { title: "ভিডিওসহ লিস্টিং" })).listing_id;
+    await approve(filmed);
+    const videoFolder = `${bob}/${filmed}`;
+    const videoUrl = (path: string) => `https://project.supabase.co/storage/v1/object/public/listing-videos/${path}`;
+    await as(SUPER, async () => {
+      for (const name of ["walk.mp4", "poster.webp", "second.mp4"]) {
+        await rows("insert into storage.objects (bucket_id, name, owner) values ('listing-videos', $1, $2)", [`${videoFolder}/${name}`, bob]);
+      }
+      await rows("insert into storage.objects (bucket_id, name, owner) values ('listing-images', $1, $2)", [`${videoFolder}/wrong-bucket.mp4`, bob]);
+    });
+    const addVideo = (actor: Actor, overrides: Record<string, unknown> = {}) => {
+      const v = {
+        listing_id: filmed,
+        storage_path: `${videoFolder}/walk.mp4`,
+        url: videoUrl(`${videoFolder}/walk.mp4`),
+        poster_path: `${videoFolder}/poster.webp`,
+        poster_url: videoUrl(`${videoFolder}/poster.webp`),
+        duration_seconds: 45,
+        mime_type: "video/mp4",
+        ...overrides,
+      };
+      return as(actor, () =>
+        rows(
+          "insert into public.listing_videos (listing_id, storage_path, url, poster_path, poster_url, duration_seconds, mime_type) values ($1, $2, $3, $4, $5, $6, $7)",
+          [v.listing_id, v.storage_path, v.url, v.poster_path, v.poster_url, v.duration_seconds, v.mime_type],
+        ),
+      );
+    };
+
+    await test("a video must be the lister's own upload for this listing, from the video bucket, at most 2 minutes", async () => {
+      await denied(ALICE, () => addVideo(ALICE), PERMISSION_DENIED);
+      await denied(BOB, () => addVideo(BOB, { storage_path: `${videoFolder}/missing.mp4`, url: videoUrl(`${videoFolder}/missing.mp4`) }), CHECK_VIOLATION);
+      await denied(BOB, () => addVideo(BOB, { storage_path: `${videoFolder}/wrong-bucket.mp4`, url: videoUrl(`${videoFolder}/wrong-bucket.mp4`) }), CHECK_VIOLATION);
+      await denied(BOB, () => addVideo(BOB, { url: "https://evil.example/listing-videos/walk.mp4" }), CHECK_VIOLATION);
+      await denied(BOB, () => addVideo(BOB, { poster_url: null }), CHECK_VIOLATION);
+      await denied(BOB, () => addVideo(BOB, { duration_seconds: 300 }), CHECK_VIOLATION);
+      await denied(BOB, () => addVideo(BOB, { mime_type: "video/x-msvideo" }), CHECK_VIOLATION);
+      await denied(ANON, () => addVideo(ANON), PERMISSION_DENIED);
+    });
+
+    await test("adding a video to a live listing sends it to review; visitors see it once approved; one per listing", async () => {
+      await addVideo(BOB);
+      equal(await statusOf(filmed), "pending_review", "status after adding a video");
+      equal((await as(ANON, () => rows("select id from public.listing_videos where listing_id = $1", [filmed]))).length, 0, "hidden while in review");
+      await approve(filmed);
+      const seen = await as(ANON, () => rows<{ url: string; poster_url: string }>("select url, poster_url from public.listing_videos where listing_id = $1", [filmed]));
+      equal(seen, [{ url: videoUrl(`${videoFolder}/walk.mp4`), poster_url: videoUrl(`${videoFolder}/poster.webp`) }], "visitors see the approved video");
+      await denied(BOB, () => addVideo(BOB, { storage_path: `${videoFolder}/second.mp4`, url: videoUrl(`${videoFolder}/second.mp4`), poster_path: null, poster_url: null }), "23505");
+    });
+
+    await test("only the lister can remove it, which also needs review; videos never go on other sites' listings", async () => {
+      await as(ALICE, () => rows("delete from public.listing_videos where listing_id = $1", [filmed]));
+      equal((await as(SUPER, () => rows("select id from public.listing_videos where listing_id = $1", [filmed]))).length, 1, "alice could not remove it");
+      await as(BOB, () => rows("delete from public.listing_videos where listing_id = $1", [filmed]));
+      equal(await statusOf(filmed), "pending_review", "removing needs review too");
+      const external = await as(SUPER, () => one<{ id: string }>("select id from public.property_listings where origin = 'external' limit 1"));
+      await denied(SUPER, () => rows(
+        "insert into public.listing_videos (listing_id, storage_path, url, mime_type) values ($1, $2, $3, 'video/mp4')",
+        [external.id, `${videoFolder}/walk.mp4`, videoUrl(`${videoFolder}/walk.mp4`)],
+      ), CHECK_VIOLATION);
+      await as(SUPER, () => rows("delete from public.property_listings where id = $1", [filmed]));
     });
 
     // -----------------------------------------------------------------------

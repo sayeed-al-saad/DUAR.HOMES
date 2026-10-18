@@ -97,6 +97,14 @@ function oneOf<T extends string>(allowed: readonly T[], value: unknown, fallback
  * Only images from our own storage bucket or the bundled demo pictures are
  * shown. A row pointing anywhere else is ignored rather than trusted.
  */
+/** Only files from our own video bucket are ever played. */
+function safeVideo(row: Row | null): ListingDetail["video"] {
+  const prefix = `${env.supabaseUrl}/storage/v1/object/public/listing-videos/`;
+  const ok = (value: unknown) => (env.supabaseUrl && typeof value === "string" && value.startsWith(prefix) ? value : null);
+  const url = ok(row?.url);
+  return url ? { url, posterUrl: ok(row?.poster_url) } : null;
+}
+
 function safeImageUrl(value: unknown): string | null {
   const url = stringOrNull(value);
   if (!url) return null;
@@ -159,6 +167,7 @@ function toDetail(row: Row): ListingDetail {
     parentLocationSlug: stringOrNull(row.parent_location_slug),
     publishedAt: stringOrNull(row.published_at),
     priceHistory: history.map((point) => ({ price: Number(point.price), recordedAt: String(point.recorded_at) })),
+    video: null,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -412,7 +421,11 @@ export const supabaseRepository: Repository = {
       .in("status", ["active", "stale", "sold", "rented"])
       .maybeSingle();
     if (error) fail("listing", error);
-    return data ? toDetail(data as unknown as Row) : null;
+    if (!data) return null;
+    const detail = toDetail(data as unknown as Row);
+    if (detail.origin !== "first_party") return detail;
+    const { data: video } = await supabase.from("listing_videos").select("url, poster_url").eq("listing_id", detail.id).maybeSingle();
+    return { ...detail, video: safeVideo(video as Row | null) };
   },
 
   async getSimilarListings(listing, limit) {
