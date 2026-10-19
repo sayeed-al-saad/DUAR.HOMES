@@ -181,6 +181,7 @@ export interface PendingListing extends OwnListing {
   contactName: string | null;
   phone: string | null;
   photos: string[];
+  video: ListingVideo | null;
   facts: Row;
 }
 
@@ -199,11 +200,13 @@ export async function getPendingListings(): Promise<PendingListing[]> {
 
   const ids = rows.map((row) => String(row.id));
   const propertyIds = rows.map((row) => String(row.property_id));
-  const [contacts, addresses, images] = await Promise.all([
+  const [contacts, addresses, images, videos] = await Promise.all([
     supabase.from("listing_contacts").select("listing_id, contact_name, phone").in("listing_id", ids),
     supabase.from("property_private").select("property_id, address_line").in("property_id", propertyIds),
     supabase.from("listing_images").select("listing_id, url, sort_order").in("listing_id", ids).order("sort_order"),
+    supabase.from("listing_videos").select("listing_id, url, poster_url").in("listing_id", ids),
   ]);
+  const videoBy = new Map(((videos.data ?? []) as Row[]).map((row) => [String(row.listing_id), row]));
   const contactBy = new Map(((contacts.data ?? []) as Row[]).map((row) => [String(row.listing_id), row]));
   const addressBy = new Map(((addresses.data ?? []) as Row[]).map((row) => [String(row.property_id), row]));
 
@@ -217,6 +220,9 @@ export async function getPendingListings(): Promise<PendingListing[]> {
       contactName: typeof contact?.contact_name === "string" ? contact.contact_name : null,
       phone: typeof contact?.phone === "string" ? contact.phone : null,
       photos: ((images.data ?? []) as Row[]).filter((image) => image.listing_id === row.id).map((image) => String(image.url)),
+      video: videoBy.has(String(row.id))
+        ? { url: String(videoBy.get(String(row.id))?.url), posterUrl: typeof videoBy.get(String(row.id))?.poster_url === "string" ? String(videoBy.get(String(row.id))?.poster_url) : null }
+        : null,
       facts: row,
     };
   });
@@ -246,6 +252,7 @@ export interface EditableListing {
   status: ListingStatus;
   locationSlug: string;
   photos: Array<{ id: string; url: string }>;
+  video: ListingVideo | null;
   /** The form's starting values, in the same shape the form submits. */
   values: {
     purpose: Purpose;
@@ -311,6 +318,7 @@ export async function getListingForEdit(user: CurrentUser, listingId: string): P
     status: oneOf(LISTING_STATUSES, row.status, "pending_review"),
     locationSlug: text(place?.slug),
     photos: ((images.data ?? []) as Row[]).map((image) => ({ id: String(image.id), url: String(image.url) })),
+    video: await getListingVideo(listingId),
     values: {
       purpose: oneOf(PURPOSES, row.purpose, "rent"),
       propertyType: oneOf(PROPERTY_TYPES, facts.property_type, "apartment"),
@@ -388,4 +396,93 @@ export async function updateListingPhotos(user: CurrentUser, listingId: string, 
     if (removeError) console.error("removing old photo files failed:", removeError.message);
   }
   return Number(data);
+}
+
+// ---------------------------------------------------------------------------
+// Listing videos
+// ---------------------------------------------------------------------------
+
+export interface ListingVideo {
+  url: string;
+  posterUrl: string | null;
+}
+
+const VIDEO_MIME: Record<string, string> = { mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime" };
+
+/**
+ * Records the video the browser uploaded to listing-videos/<user id>/<listing id>/,
+ * replacing any earlier one (whose files are then deleted). The database checks
+ * the files really are this lister's uploads for this listing.
+ */
+export async function attachVideo(
+  user: CurrentUser,
+  listingId: string,
+  videoPath: string,
+  posterPath: string | null,
+  durationSeconds: number | null,
+): Promise<boolean> {
+  if (!isUuid(listingId)) return false;
+  const prefix = `${user.id}/${listingId}/`;
+  const ext = /\.(mp4|webm|mov)$/i.exec(videoPath)?.[1]?.toLowerCase();
+  const pathOk = (path: string) => path.startsWith(prefix) && /^[a-z0-9-]+\/[a-z0-9-]+\/[a-z0-9-]+\.(mp4|webm|mov|webp|jpg)$/i.test(path);
+  if (!ext || !pathOk(videoPath) || (posterPath !== null && !pathOk(posterPath))) return false;
+  const duration = typeof durationSeconds === "number" && Number.isFinite(durationSeconds) && durationSeconds > 0 ? Math.round(durationSeconds * 10) / 10 : null;
+
+  const supabase = await createSupabaseServerClient();
+  const bucket = supabase.storage.from("listing-videos");
+  const { data: old } = await supabase.from("listing_videos").select("storage_path, poster_path").eq("listing_id", listingId).maybeSingle();
+  if (old) {
+    const { error } = await supabase.from("listing_videos").delete().eq("listing_id", listingId);
+    if (error) {
+      console.error("replacing the video failed:", error.code, error.message);
+      return false;
+    }
+  }
+  const { error } = await supabase.from("listing_videos").insert({
+    listing_id: listingId,
+    storage_path: videoPath,
+    url: bucket.getPublicUrl(videoPath).data.publicUrl,
+    poster_path: posterPath,
+    poster_url: posterPath ? bucket.getPublicUrl(posterPath).data.publicUrl : null,
+    duration_seconds: duration,
+    mime_type: VIDEO_MIME[ext],
+  });
+  if (error) {
+    console.error("attaching the video failed:", error.code, error.message);
+    return false;
+  }
+  if (old) await removeVideoFiles(user, old as Row);
+  return true;
+}
+
+/** Removes the listing's video and its files. */
+export async function removeVideo(user: CurrentUser, listingId: string): Promise<boolean> {
+  if (!isUuid(listingId)) return false;
+  const supabase = await createSupabaseServerClient();
+  const { data: old } = await supabase.from("listing_videos").select("storage_path, poster_path").eq("listing_id", listingId).maybeSingle();
+  if (!old) return true;
+  const { error, count } = await supabase.from("listing_videos").delete({ count: "exact" }).eq("listing_id", listingId);
+  if (error || !count) {
+    if (error) console.error("removing the video failed:", error.code, error.message);
+    return false;
+  }
+  await removeVideoFiles(user, old as Row);
+  return true;
+}
+
+async function removeVideoFiles(user: CurrentUser, row: Row) {
+  const paths = [row.storage_path, row.poster_path].filter((path): path is string => typeof path === "string" && path.startsWith(`${user.id}/`));
+  if (paths.length === 0) return;
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.storage.from("listing-videos").remove(paths);
+  if (error) console.error("removing old video files failed:", error.message);
+}
+
+/** The video of one listing, for the lister's edit page and the review queue. */
+export async function getListingVideo(listingId: string): Promise<ListingVideo | null> {
+  if (!isUuid(listingId)) return null;
+  const supabase = await createSupabaseServerClient();
+  const { data } = await supabase.from("listing_videos").select("url, poster_url").eq("listing_id", listingId).maybeSingle();
+  const row = data as Row | null;
+  return row && typeof row.url === "string" ? { url: row.url, posterUrl: typeof row.poster_url === "string" ? row.poster_url : null } : null;
 }

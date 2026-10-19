@@ -98,6 +98,20 @@ async function Queue() {
                 ) : (
                   <p className="text-xs text-slate">{bn.review.noPhotos}</p>
                 )}
+                {listing.video ? (
+                  <div className="mt-3 max-w-sm">
+                    <p className="text-xs text-slate">{bn.review.video}</p>
+                    <video
+                      src={listing.video.url}
+                      poster={listing.video.posterUrl ?? undefined}
+                      controls
+                      playsInline
+                      preload="none"
+                      aria-label={bn.review.video}
+                      className="mt-1 aspect-video w-full rounded-lg bg-ink object-contain"
+                    />
+                  </div>
+                ) : null}
               </div>
 
               <div className="mt-4">

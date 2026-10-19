@@ -143,6 +143,7 @@ function detailOf(card: ListingCard, extra: Partial<ListingDetail>): ListingDeta
   const place = placeInfo(card.locationSlug);
   return {
     ...card,
+    video: null,
     description: null,
     furnishing: null,
     balconies: null,

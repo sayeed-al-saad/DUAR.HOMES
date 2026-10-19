@@ -295,6 +295,24 @@ async function ListingBody({ params }: Pick<Props, "params">) {
             </section>
           ) : null}
 
+          {listing.video ? (
+            <section aria-labelledby="video-title" className="mt-8">
+              <h2 id="video-title" className="text-xl">
+                {bn.listingPage.video}
+              </h2>
+              {/* Nothing downloads until the visitor presses play: saves their data and our bandwidth. */}
+              <video
+                src={listing.video.url}
+                poster={listing.video.posterUrl ?? undefined}
+                controls
+                playsInline
+                preload="none"
+                aria-labelledby="video-title"
+                className="mt-3 aspect-video w-full max-w-3xl rounded-2xl bg-ink object-contain"
+              />
+            </section>
+          ) : null}
+
           {listing.description ? (
             <section aria-labelledby="description-title" className="mt-8">
               <h2 id="description-title" className="text-xl">

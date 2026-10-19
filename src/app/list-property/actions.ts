@@ -5,7 +5,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { CACHE_TAGS } from "@/lib/data";
 import { isSupabaseConfigured } from "@/lib/env";
 import { bn } from "@/lib/i18n/bn";
-import { attachPhotos, submitListing } from "@/lib/listings/server";
+import { attachPhotos, attachVideo, removeVideo, submitListing } from "@/lib/listings/server";
 import { submissionErrors, submissionSchema, type SubmissionErrors, type SubmissionInput } from "@/lib/listings/submission-schema";
 
 export type SubmitListingState =
@@ -40,4 +40,22 @@ export async function attachListingPhotos(listingId: string, paths: string[], al
   // Not public yet, but the lister's own pages should show the photos at once.
   updateTag(CACHE_TAGS.listings);
   return attached;
+}
+
+/** Step 3 (optional): record the video the browser uploaded, replacing any earlier one. */
+export async function attachListingVideoAction(listingId: string, videoPath: string, posterPath: string | null, durationSeconds: number | null): Promise<boolean> {
+  const user = await getCurrentUser();
+  if (!user || typeof videoPath !== "string") return false;
+  const done = await attachVideo(user, String(listingId), videoPath, typeof posterPath === "string" ? posterPath : null, Number(durationSeconds) || null);
+  if (done) updateTag(CACHE_TAGS.listings);
+  return done;
+}
+
+/** Edit page: the lister removed the video. */
+export async function removeListingVideoAction(listingId: string): Promise<boolean> {
+  const user = await getCurrentUser();
+  if (!user) return false;
+  const done = await removeVideo(user, String(listingId));
+  if (done) updateTag(CACHE_TAGS.listings);
+  return done;
 }

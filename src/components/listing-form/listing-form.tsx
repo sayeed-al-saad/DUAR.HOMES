@@ -1,11 +1,11 @@
 "use client";
 
-import { ImagePlus, X } from "lucide-react";
+import { Clapperboard, ImagePlus, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { saveListingPhotosAction, updateListingAction } from "@/app/account/listings/actions";
-import { attachListingPhotos, submitListingAction } from "@/app/list-property/actions";
+import { attachListingPhotos, attachListingVideoAction, removeListingVideoAction, submitListingAction } from "@/app/list-property/actions";
 import { LocationCombobox } from "@/components/location/location-combobox";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import {
   type SubmissionErrors,
   type SubmissionInput,
 } from "@/lib/listings/submission-schema";
+import { MAX_VIDEO_BYTES, MAX_VIDEO_SECONDS, posterFrame, VIDEO_TYPES, videoDuration, withoutLocation } from "@/lib/listings/video";
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -45,6 +46,7 @@ interface ListingFormProps {
     values: EditableListing["values"];
     location: LocationSummary | null;
     photos: EditableListing["photos"];
+    video: EditableListing["video"];
   };
 }
 
@@ -53,6 +55,9 @@ type Fields = Omit<SubmissionInput, "amenities" | "priceNegotiable" | "agree" | 
   propertyType: PropertyType | "";
   listerType: (typeof SUBMITTER_TYPES)[number] | "";
 };
+
+/** The video in the form: the one already on the listing, or a new file to upload. */
+type VideoChoice = { kind: "existing"; url: string; posterUrl: string | null } | { kind: "new"; file: File; preview: string; duration: number };
 
 /** A photo in the form: either already on the listing (existingId) or a new file to upload. */
 interface Photo {
@@ -187,6 +192,9 @@ export function ListingForm({ popularLocations, amenities, defaultName, edit }: 
     () => edit?.photos.map((photo) => ({ id: photo.id, preview: photo.url, existingId: photo.id })) ?? [],
   );
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [video, setVideo] = useState<VideoChoice | null>(edit?.video ? { kind: "existing", ...edit.video } : null);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [checkingVideo, setCheckingVideo] = useState(false);
   const [errors, setErrors] = useState<SubmissionErrors>({});
   const [busy, setBusy] = useState<string | null>(null);
   const formTop = useRef<HTMLDivElement>(null);
@@ -222,6 +230,47 @@ export function ListingForm({ popularLocations, amenities, defaultName, edit }: 
       if (all.length > MAX_PHOTOS) setPhotoError(t.tooManyPhotos);
       return all.slice(0, MAX_PHOTOS);
     });
+  }
+
+  async function chooseVideo(file: File | undefined) {
+    if (!file) return;
+    setVideoError(null);
+    const type = file.type || (/\.mov$/i.test(file.name) ? "video/quicktime" : "");
+    if (!(VIDEO_TYPES as readonly string[]).includes(type)) return setVideoError(t.videoBadType);
+    if (file.size > MAX_VIDEO_BYTES) return setVideoError(t.videoTooBig);
+    setCheckingVideo(true);
+    const preview = URL.createObjectURL(file);
+    photoUrls.current.push(preview);
+    const duration = await videoDuration(preview);
+    setCheckingVideo(false);
+    if (duration === null) return setVideoError(t.videoUnreadable);
+    if (duration > MAX_VIDEO_SECONDS + 1) return setVideoError(t.videoTooLong);
+    setVideo({ kind: "new", file: new File([file], file.name, { type }), preview, duration });
+  }
+
+  /** Uploads a new video (location tags blanked) with its poster frame, or removes one the lister took out. */
+  async function saveVideo(userId: string, listingId: string): Promise<boolean> {
+    if (video?.kind === "new") {
+      setBusy(t.videoUploading);
+      const supabase = getSupabaseBrowserClient();
+      const bucket = supabase.storage.from("listing-videos");
+      const suffix = Math.random().toString(36).slice(2, 8);
+      const ext = video.file.type === "video/webm" ? "webm" : video.file.type === "video/quicktime" ? "mov" : "mp4";
+      const path = `${userId}/${listingId}/video-${suffix}.${ext}`;
+      const { error } = await bucket.upload(path, await withoutLocation(video.file), { contentType: video.file.type, upsert: false });
+      if (error) return false;
+      let posterPath: string | null = null;
+      const poster = await posterFrame(video.preview);
+      if (poster) {
+        const posterExt = poster.type === "image/webp" ? "webp" : "jpg";
+        const candidate = `${userId}/${listingId}/poster-${suffix}.${posterExt}`;
+        const { error: posterError } = await bucket.upload(candidate, poster, { contentType: poster.type, upsert: false });
+        if (!posterError) posterPath = candidate;
+      }
+      return attachListingVideoAction(listingId, path, posterPath, video.duration);
+    }
+    if (edit?.video && !video) return removeListingVideoAction(listingId);
+    return true;
   }
 
   async function uploadPhotos(userId: string, listingId: string): Promise<string[]> {
@@ -280,7 +329,8 @@ export function ListingForm({ popularLocations, amenities, defaultName, edit }: 
         const attached = paths.length > 0 ? await attachListingPhotos(result.listingId, paths, String(fields.title ?? "")) : 0;
         photosOk = attached === photos.length;
       }
-      router.push(`/account/listings?submitted=${photosOk ? "1" : "photos"}`);
+      const videoOk = await saveVideo(result.userId, result.listingId);
+      router.push(`/account/listings?submitted=${photosOk && videoOk ? "1" : "photos"}`);
     } catch {
       setErrors({ form: t.errors.generic });
     } finally {
@@ -308,8 +358,10 @@ export function ListingForm({ popularLocations, amenities, defaultName, edit }: 
         const count = await saveListingPhotosAction(edit.listingId, keep, paths, String(fields.title ?? ""));
         photosOk = count === keep.length + fresh.length;
       }
-      const nowStatus = photosChanged && result.listingStatus === "active" ? "pending_review" : result.listingStatus;
-      const outcome = !photosOk ? "photos" : edit.status !== "active" ? "pending" : nowStatus === "active" ? "live" : "review";
+      const videoChanged = video?.kind === "new" || (edit.video !== null && video === null);
+      const videoOk = await saveVideo(result.userId, edit.listingId);
+      const nowStatus = (photosChanged || videoChanged) && result.listingStatus === "active" ? "pending_review" : result.listingStatus;
+      const outcome = !photosOk || !videoOk ? "photos" : edit.status !== "active" ? "pending" : nowStatus === "active" ? "live" : "review";
       router.push(`/account/listings?edited=${outcome}`);
     } catch {
       setErrors({ form: t.errors.generic });
@@ -518,6 +570,53 @@ export function ListingForm({ popularLocations, amenities, defaultName, edit }: 
         ) : null}
       </section>
 
+      <section aria-labelledby="s-video" className="rounded-2xl border border-line p-4 sm:p-6">
+        <h2 id="s-video" className="text-xl">
+          {t.videoTitle}
+        </h2>
+        <p id="s-video-hint" className="mt-1 text-sm text-slate">
+          {t.videoHint}
+        </p>
+        {video ? (
+          <div className="mt-4 max-w-md">
+            <video
+              src={video.kind === "new" ? video.preview : video.url}
+              poster={video.kind === "existing" ? (video.posterUrl ?? undefined) : undefined}
+              controls
+              playsInline
+              preload="metadata"
+              aria-label={t.videoLabel}
+              className="aspect-video w-full rounded-lg bg-ink object-contain"
+            />
+            <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => setVideo(null)}>
+              <X aria-hidden className="size-4" />
+              {t.removeVideo}
+            </Button>
+          </div>
+        ) : (
+          <label className="mt-4 inline-flex h-12 cursor-pointer items-center gap-2 rounded-lg border border-input px-4 font-bold hover:bg-accent has-focus-visible:outline-2 has-focus-visible:outline-ring">
+            <Clapperboard aria-hidden className="size-5 text-indigo" />
+            {checkingVideo ? t.videoChecking : t.chooseVideo}
+            <input
+              type="file"
+              accept={[...VIDEO_TYPES, ".mp4", ".mov", ".webm"].join(",")}
+              aria-describedby="s-video-hint"
+              className="sr-only"
+              disabled={checkingVideo}
+              onChange={(event) => {
+                void chooseVideo(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+          </label>
+        )}
+        {videoError ? (
+          <p role="alert" className="mt-2 text-sm text-destructive">
+            {videoError}
+          </p>
+        ) : null}
+      </section>
+
       <Section id="s-about" title={t.sections.about}>
         <Field id="f-title" label={t.titleLabel} hint={t.titleHint} error={errors.title} className="sm:col-span-2">
           <Input id="f-title" value={fields.title as string} onChange={set("title")} maxLength={120} placeholder={t.titlePlaceholder} {...invalid("title")} />
@@ -588,7 +687,7 @@ export function ListingForm({ popularLocations, amenities, defaultName, edit }: 
           </span>
         </label>
         {errors.agree ? <p className="mt-1 text-sm text-destructive">{errors.agree}</p> : null}
-        <Button type="submit" variant="flame" size="lg" className="mt-5 w-full sm:w-auto" disabled={busy !== null}>
+        <Button type="submit" variant="flame" size="lg" className="mt-5 w-full sm:w-auto" disabled={busy !== null || checkingVideo}>
           {busy ?? (edit ? bn.editListing.save : t.submit)}
         </Button>
       </div>

@@ -165,6 +165,8 @@ export interface ListingDetail extends ListingCard {
   parentLocationSlug: string | null;
   publishedAt: string | null;
   priceHistory: PriceHistoryPoint[];
+  /** The lister's video, for listings made on this site. Served from our own bucket only. */
+  video: { url: string; posterUrl: string | null } | null;
   /** When the data was read. Freshness labels are computed against this, so cached pages stay consistent. */
   generatedAt: string;
 }
