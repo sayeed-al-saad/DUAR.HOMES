@@ -11,5 +11,5 @@ export const siteConfig = {
   locale: "bn-BD",
   url: process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
   /** Where privacy requests, reports and questions go. Shown in the footer and the legal pages. */
-  contactEmail: process.env.NEXT_PUBLIC_CONTACT_EMAIL || "hello@duar.homes",
+  contactEmail: process.env.NEXT_PUBLIC_CONTACT_EMAIL || "info@duar.homes",
 } as const;

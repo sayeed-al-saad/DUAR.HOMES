@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { privacyPolicy, termsOfUse, LEGAL_UPDATED_AT } from "@/lib/legal/content";
 
-const site = { name: "দুয়ার", contactEmail: "hello@duar.homes" };
+const site = { name: "দুয়ার", contactEmail: "info@duar.homes" };
 
 describe.each([
   ["privacy", privacyPolicy(site)],
